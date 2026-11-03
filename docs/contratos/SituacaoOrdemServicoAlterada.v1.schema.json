@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SituacaoOrdemServicoAlterada v1",
+  "description": "Evento OS -> Identity (notificacao do cliente): a situacao da OS mudou. Canal: SNS mecanica-os-eventos. Payload do envelope (envelope.schema.json) com type=SituacaoOrdemServicoAlterada e version=1.",
+  "type": "object",
+  "required": [
+    "osId",
+    "clienteId",
+    "placa",
+    "de",
+    "para",
+    "ocorridaEm"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "osId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "clienteId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "placa": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$",
+      "description": "Placa sem hifen, padrao antigo (ABC1234) ou Mercosul (ABC1D23), como no value object Placa."
+    },
+    "de": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "RECEBIDA",
+            "EM_DIAGNOSTICO",
+            "AGUARDANDO_APROVACAO",
+            "EM_EXECUCAO",
+            "FINALIZADA",
+            "AGUARDANDO_PAGAMENTO",
+            "ENTREGUE",
+            "CANCELADA"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Situacao anterior; null na abertura da OS (para = RECEBIDA)."
+    },
+    "para": {
+      "type": "string",
+      "enum": [
+        "RECEBIDA",
+        "EM_DIAGNOSTICO",
+        "AGUARDANDO_APROVACAO",
+        "EM_EXECUCAO",
+        "FINALIZADA",
+        "AGUARDANDO_PAGAMENTO",
+        "ENTREGUE",
+        "CANCELADA"
+      ]
+    },
+    "motivo": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "ocorridaEm": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

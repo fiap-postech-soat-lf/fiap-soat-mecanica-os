@@ -21,6 +21,7 @@ import br.com.fiap.soat.mecanica.os.application.saga.dto.ReservaPecasLiberada;
 import br.com.fiap.soat.mecanica.os.application.saga.dto.ReservaPecasRecusada;
 import br.com.fiap.soat.mecanica.os.config.SagaTimeoutProperties;
 import br.com.fiap.soat.mecanica.os.config.observability.BusinessEventLogger;
+import br.com.fiap.soat.mecanica.os.config.observability.Mdc;
 import br.com.fiap.soat.mecanica.os.domain.exception.RecursoNaoEncontradoException;
 import br.com.fiap.soat.mecanica.os.domain.exception.RegraNegocioException;
 import br.com.fiap.soat.mecanica.os.domain.ordemservico.MudancaSituacao;
@@ -585,8 +586,7 @@ public class SagaOrquestrador {
     }
 
     private void descartar(SagaInstancia saga, String tipo, UUID messageId) {
-        log.atInfo().addKeyValue("event", "resposta_fora_do_passo")
-                .addKeyValue("sagaId", saga.getId()).addKeyValue("osId", saga.getOsId())
+        Mdc.comSagaEOs(log.atInfo().addKeyValue("event", "resposta_fora_do_passo"), saga.getId(), saga.getOsId())
                 .addKeyValue("tipo", tipo).addKeyValue("passo", saga.getPassoAtual())
                 .addKeyValue("status", saga.getStatus())
                 .log("Resposta fora do passo; descartada");
@@ -594,8 +594,8 @@ public class SagaOrquestrador {
     }
 
     private void sagaInexistente(UUID osId, String tipo) {
-        log.atWarn().addKeyValue("event", "saga_inexistente")
-                .addKeyValue("osId", osId).addKeyValue("tipo", tipo)
+        Mdc.comOs(log.atWarn().addKeyValue("event", "saga_inexistente"), osId)
+                .addKeyValue("tipo", tipo)
                 .log("Mensagem para uma OS sem Saga; concluída sem efeito");
     }
 

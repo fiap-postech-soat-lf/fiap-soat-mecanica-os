@@ -60,7 +60,9 @@ class PerfisIT extends IntegracaoTest {
         String servicoAlterado = "{\"nome\":\"Troca de oleo sintetico\",\"descricao\":\"Novo\"}";
         Set<String> atendenteOuMecanico = Set.of(ATENDENTE, MECANICO);
         Set<String> soMecanico = Set.of(MECANICO);
+        String novaOs = "{\"veiculoId\":\"" + UUID.randomUUID() + "\",\"observacao\":\"Barulho\"}";
         return Stream.of(
+                new Rota(HttpMethod.POST, "/ordem-servicos", novaOs, atendenteOuMecanico),
                 new Rota(HttpMethod.GET, "/ordem-servicos", null, atendenteOuMecanico),
                 new Rota(HttpMethod.GET, "/ordem-servicos/" + id, null, atendenteOuMecanico),
                 new Rota(HttpMethod.GET, "/ordem-servicos/" + id + "/historico", null, atendenteOuMecanico),

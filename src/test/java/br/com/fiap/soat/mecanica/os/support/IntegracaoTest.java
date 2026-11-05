@@ -1,5 +1,7 @@
 package br.com.fiap.soat.mecanica.os.support;
 
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -49,6 +51,9 @@ public abstract class IntegracaoTest {
             new LocalStackContainer(DockerImageName.parse("localstack/localstack:4.14.0"))
                     .withServices(Service.SNS, Service.SQS);
 
+    /** Faz o papel do Identity (F4-m); porta dinamica. Cada teste que o usa chama {@code resetAll()} antes. */
+    protected static final WireMockServer IDENTITY = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+
     protected static final SqsClient SQS;
     protected static final SnsClient SNS;
     protected static final Mensageria MENSAGERIA;
@@ -56,6 +61,7 @@ public abstract class IntegracaoTest {
     static {
         POSTGRES.start();
         LOCALSTACK.start();
+        IDENTITY.start();
         SQS = configurar(SqsClient.builder()).build();
         SNS = configurar(SnsClient.builder()).build();
         MENSAGERIA = Mensageria.criar();
@@ -77,6 +83,10 @@ public abstract class IntegracaoTest {
         registry.add("app.messaging.destinos.teste-eventos", MENSAGERIA::topicoEventos);
         registry.add("app.messaging.destinos.teste-comandos", MENSAGERIA::filaComandos);
         registry.add("app.messaging.destinos.teste-quebrado", MENSAGERIA::topicoInexistente);
+        registry.add("app.messaging.destinos.execucao-comandos", MENSAGERIA::execucaoComandos);
+        registry.add("app.messaging.destinos.os-eventos", MENSAGERIA::osEventos);
+        registry.add("app.identity.base-url", IDENTITY::baseUrl);
+        registry.add("app.identity.retry.espera-inicial", () -> "50ms");
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
@@ -124,7 +134,8 @@ public abstract class IntegracaoTest {
      * da aplicacao; {@code filaAssinante} recebe (raw) o que e publicado em {@code topicoEventos}.
      */
     public record Mensageria(String filaEntrada, String topicoEventos, String filaAssinante,
-                             String filaComandos, String dlq, String topicoInexistente) {
+                             String filaComandos, String dlq, String topicoInexistente,
+                             String execucaoComandos, String osEventos, String notificacoes) {
 
         static Mensageria criar() {
             String filaEntrada = SQS.createQueue(r -> r.queueName("os-teste-entrada")).queueUrl();
@@ -137,7 +148,16 @@ public abstract class IntegracaoTest {
             SNS.subscribe(r -> r.topicArn(topico).protocol("sqs").endpoint(arnAssinante)
                     .attributes(Map.of("RawMessageDelivery", "true")));
             String inexistente = topico.substring(0, topico.lastIndexOf(':') + 1) + "os-teste-inexistente";
-            return new Mensageria(filaEntrada, topico, filaAssinante, filaComandos, dlq, inexistente);
+            // Topologia real (tabela 3.4 da F1): quem publica usa os nomes mecanica-*
+            String execucaoComandos = SQS.createQueue(r -> r.queueName("mecanica-execucao-comandos")).queueUrl();
+            String notificacoes = SQS.createQueue(r -> r.queueName("mecanica-identity-notificacoes")).queueUrl();
+            String osEventos = SNS.createTopic(r -> r.name("mecanica-os-eventos")).topicArn();
+            String arnNotificacoes = SQS.getQueueAttributes(r -> r.queueUrl(notificacoes)
+                    .attributeNames(QueueAttributeName.QUEUE_ARN)).attributes().get(QueueAttributeName.QUEUE_ARN);
+            SNS.subscribe(r -> r.topicArn(osEventos).protocol("sqs").endpoint(arnNotificacoes)
+                    .attributes(Map.of("RawMessageDelivery", "true")));
+            return new Mensageria(filaEntrada, topico, filaAssinante, filaComandos, dlq, inexistente,
+                    execucaoComandos, osEventos, notificacoes);
         }
     }
 }

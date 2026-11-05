@@ -4,6 +4,8 @@ import br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico.dto.HistoricoSi
 import br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico.dto.OrdemServicoResponse;
 import br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico.dto.PaginaResponse;
 import br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico.dto.SituacaoPublicaResponse;
+import br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico.dto.AbrirOrdemServicoRequest;
+import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.AbrirOrdemServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.BuscarHistoricoOrdemServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.BuscarOrdemServicoPorIdUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.ConsultarSituacaoPorPlacaUseCase;
@@ -13,22 +15,27 @@ import br.com.fiap.soat.mecanica.os.domain.Pagina;
 import br.com.fiap.soat.mecanica.os.domain.Paginacao;
 import br.com.fiap.soat.mecanica.os.domain.ordemservico.OrdemServico;
 import io.swagger.v3.oas.annotations.Operation;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.URI;
 import java.util.List;
 import java.util.UUID;
 
-/** Consultas da OS (as escritas entram com a abertura e a Saga, T03 e T04). */
+/** Abertura e consultas da OS (cancelar e revisar o orçamento entram com a Saga, T04). */
 @RestController
 @RequestMapping("/ordem-servicos")
 @RequiredArgsConstructor
@@ -37,11 +44,22 @@ public class OrdemServicoController {
 
     private static final String ATENDENTE_OU_MECANICO = "hasAnyRole('ATENDENTE', 'MECANICO')";
 
+    private final AbrirOrdemServicoUseCase abrirUseCase;
     private final ListarOrdensServicoUseCase listarUseCase;
     private final BuscarOrdemServicoPorIdUseCase buscarPorIdUseCase;
     private final BuscarHistoricoOrdemServicoUseCase buscarHistoricoUseCase;
     private final ListarMinhasOrdensServicoUseCase listarMinhasUseCase;
     private final ConsultarSituacaoPorPlacaUseCase consultarSituacaoPorPlacaUseCase;
+
+    @PostMapping
+    @PreAuthorize(ATENDENTE_OU_MECANICO)
+    @Operation(summary = "Abrir uma ordem de serviço (consulta o veículo no Identity e inicia a Saga)")
+    public ResponseEntity<OrdemServicoResponse> abrir(@Valid @RequestBody AbrirOrdemServicoRequest request) {
+        OrdemServico os = abrirUseCase.executar(request.veiculoId(), request.observacao());
+        URI local = ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}")
+                .buildAndExpand(os.getId()).toUri();
+        return ResponseEntity.created(local).body(OrdemServicoResponseMapper.toResponse(os));
+    }
 
     @GetMapping
     @PreAuthorize(ATENDENTE_OU_MECANICO)

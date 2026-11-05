@@ -8,7 +8,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: mecanica-${SERVICO}
-  minReplicas: 1
+  minReplicas: 2 # corte 1 da F4: o scheduler de timeouts usa SKIP LOCKED e o OS roda com 2 replicas
   maxReplicas: 3
   metrics:
     - type: Resource

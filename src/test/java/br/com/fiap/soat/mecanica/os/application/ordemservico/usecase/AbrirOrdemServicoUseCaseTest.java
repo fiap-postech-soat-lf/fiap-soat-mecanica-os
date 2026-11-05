@@ -67,7 +67,7 @@ class AbrirOrdemServicoUseCaseTest {
     @BeforeEach
     void preparar() {
         useCase = new AbrirOrdemServicoUseCase(veiculoPort, ordemServicoRepository, sagaRepository, outbox,
-                new MensagemFactory(new ObjectMapper().findAndRegisterModules()), usuarioAutenticado, meterRegistry,
+                new MensagemFactory(new ObjectMapper().findAndRegisterModules()), usuarioAutenticado, new br.com.fiap.soat.mecanica.os.application.saga.SagaMetrics(meterRegistry),
                 RELOGIO);
         when(usuarioAutenticado.sub()).thenReturn(ATENDENTE_ID);
         when(veiculoPort.consultar(VEICULO_ID)).thenReturn(new Veiculo(VEICULO_ID, PLACA, CLIENTE_ID, true));
@@ -126,7 +126,7 @@ class AbrirOrdemServicoUseCaseTest {
         assertThat(situacao.payload().path("para").asText()).isEqualTo("RECEBIDA");
         assertThat(situacao.payload().path("clienteId").asText()).isEqualTo(CLIENTE_ID.toString());
 
-        assertThat(meterRegistry.counter("saga.iniciada").count()).isEqualTo(1.0);
+        assertThat(meterRegistry.counter("saga.iniciada", "passo", "ABRIR_DIAGNOSTICO").count()).isEqualTo(1.0);
     }
 
     @Test

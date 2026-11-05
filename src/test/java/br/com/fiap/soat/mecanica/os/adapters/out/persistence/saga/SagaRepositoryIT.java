@@ -66,7 +66,7 @@ class SagaRepositoryIT extends IntegracaoTest {
         UUID orcamentoId = UUID.randomUUID();
         contexto.setOrcamentoId(orcamentoId);
         UUID messageId = UUID.randomUUID();
-        contexto.setUltimoComando(new ContextoSaga.ComandoEnviado("ReservarPecas", messageId));
+        contexto.setUltimoComando(new ContextoSaga.ComandoEnviado("ReservarPecas", messageId, null));
 
         SagaInstancia salva = sagaRepository.salvar(saga);
         entityManager.clear(); // a leitura abaixo vem do banco, nao do contexto de persistencia
@@ -88,7 +88,7 @@ class SagaRepositoryIT extends IntegracaoTest {
         assertThat(lido.isReservaAtiva()).isTrue();
         assertThat(lido.isLiberacaoPendente()).isTrue();
         assertThat(lido.getOrcamentoId()).isEqualTo(orcamentoId);
-        assertThat(lido.getUltimoComando()).isEqualTo(new ContextoSaga.ComandoEnviado("ReservarPecas", messageId));
+        assertThat(lido.getUltimoComando()).isEqualTo(new ContextoSaga.ComandoEnviado("ReservarPecas", messageId, null));
         assertThat(lido.getDiagnosticoEmEspera()).isNull();
     }
 

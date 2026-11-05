@@ -2,6 +2,7 @@ package br.com.fiap.soat.mecanica.os.application.saga;
 
 import br.com.fiap.soat.mecanica.os.application.mensageria.MensagemEnvelope;
 import br.com.fiap.soat.mecanica.os.application.mensageria.MensagemFactory;
+import br.com.fiap.soat.mecanica.os.domain.saga.ContextoSaga.ComandoEnviado;
 import br.com.fiap.soat.mecanica.os.domain.saga.ContextoSaga.ItemDiagnostico;
 import br.com.fiap.soat.mecanica.os.domain.saga.ContextoSaga.PecaItem;
 import br.com.fiap.soat.mecanica.os.domain.saga.ContextoSaga.PecaReservada;
@@ -63,6 +64,21 @@ public class ComandosSaga {
     public MensagemEnvelope cancelarOrcamento(UUID sagaId, UUID osId, UUID orcamentoId, String motivo) {
         return fabrica.criar("CancelarOrcamento", 1, sagaId, osId,
                 Map.of("osId", osId, "orcamentoId", orcamentoId, "motivo", motivo));
+    }
+
+    /** Para onde vai cada comando. */
+    public static String destinoDe(String tipo) {
+        return switch (tipo) {
+            case "AbrirDiagnostico", "ReservarPecas", "LiberarReservaPecas", "IniciarExecucao" -> DESTINO_EXECUCAO;
+            default -> DESTINO_BILLING;
+        };
+    }
+
+    /** Mesmo comando num envelope novo: messageId novo e causationId = o comando anterior (F4-h). */
+    public MensagemEnvelope reenviar(ComandoEnviado original, UUID sagaId, UUID osId) {
+        MensagemEnvelope novo = fabrica.criar(original.tipo(), 1, sagaId, osId, original.payload());
+        return new MensagemEnvelope(novo.messageId(), novo.type(), novo.version(), novo.sagaId(), novo.osId(),
+                novo.correlationId(), original.messageId(), novo.occurredAt(), novo.traceparent(), novo.payload());
     }
 
     /** Soma de {@code precoMaoDeObra} + {@code quantidade x valorUnitario} de todas as peças. */

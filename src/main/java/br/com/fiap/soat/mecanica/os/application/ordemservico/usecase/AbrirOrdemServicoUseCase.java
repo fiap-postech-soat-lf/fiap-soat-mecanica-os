@@ -4,6 +4,7 @@ import br.com.fiap.soat.mecanica.os.application.mensageria.MensagemFactory;
 import br.com.fiap.soat.mecanica.os.application.mensageria.OutboxPort;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.port.Veiculo;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.port.VeiculoPort;
+import br.com.fiap.soat.mecanica.os.application.saga.SagaMetrics;
 import br.com.fiap.soat.mecanica.os.application.security.UsuarioAutenticadoPort;
 import br.com.fiap.soat.mecanica.os.config.observability.BusinessEventLogger;
 import br.com.fiap.soat.mecanica.os.domain.ordemservico.MudancaSituacao;
@@ -15,7 +16,6 @@ import br.com.fiap.soat.mecanica.os.domain.saga.PassoSaga;
 import br.com.fiap.soat.mecanica.os.domain.saga.SagaInstancia;
 import br.com.fiap.soat.mecanica.os.domain.saga.SagaPasso;
 import br.com.fiap.soat.mecanica.os.domain.saga.SagaRepository;
-import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,7 +46,7 @@ public class AbrirOrdemServicoUseCase {
     private final OutboxPort outbox;
     private final MensagemFactory mensagemFactory;
     private final UsuarioAutenticadoPort usuarioAutenticado;
-    private final MeterRegistry meterRegistry;
+    private final SagaMetrics metricas;
     private final Clock clock;
 
     @Transactional
@@ -63,7 +63,7 @@ public class AbrirOrdemServicoUseCase {
                 Map.of("osId", os.getId(), "veiculoId", os.getVeiculoId(), "placa", os.getPlaca()));
         saga.getContexto().setUltimoComando(
                 new ComandoEnviado(
-                        COMANDO_ABRIR_DIAGNOSTICO, comando.messageId()));
+                        COMANDO_ABRIR_DIAGNOSTICO, comando.messageId(), comando.payload()));
         sagaRepository.salvar(saga);
         sagaRepository.registrarPasso(SagaPasso.novo(saga.getId(), PassoSaga.ABRIR_DIAGNOSTICO,
                 COMANDO_ABRIR_DIAGNOSTICO, DirecaoPasso.ENVIADO, comando.messageId(), Map.of(),
@@ -74,7 +74,7 @@ public class AbrirOrdemServicoUseCase {
                 payloadSituacao(os, abertura));
         outbox.registrar(DESTINO_OS_EVENTOS, evento);
 
-        meterRegistry.counter("saga.iniciada").increment();
+        metricas.iniciada(PassoSaga.ABRIR_DIAGNOSTICO);
         BusinessEventLogger.ordemServicoCriada(os.getId(), os.getVeiculoId(), os.getUsuarioAberturaId());
         BusinessEventLogger.situacaoOrdemServicoAlterada(os.getId(), null, os.getSituacao());
         BusinessEventLogger.sagaPasso(saga.getId(), os.getId(), PassoSaga.ABRIR_DIAGNOSTICO,

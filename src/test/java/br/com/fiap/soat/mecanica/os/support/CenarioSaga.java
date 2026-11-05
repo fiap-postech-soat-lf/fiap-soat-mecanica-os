@@ -4,6 +4,7 @@ import br.com.fiap.soat.mecanica.os.application.mensageria.MensagemEnvelope;
 import br.com.fiap.soat.mecanica.os.application.mensageria.MensagemFactory;
 import br.com.fiap.soat.mecanica.os.application.saga.ComandosSaga;
 import br.com.fiap.soat.mecanica.os.application.saga.EventosOrdemServico;
+import br.com.fiap.soat.mecanica.os.application.saga.SagaMetrics;
 import br.com.fiap.soat.mecanica.os.application.saga.SagaOrquestrador;
 import br.com.fiap.soat.mecanica.os.config.SagaTimeoutProperties;
 import br.com.fiap.soat.mecanica.os.domain.ordemservico.MudancaSituacao;
@@ -16,7 +17,9 @@ import br.com.fiap.soat.mecanica.os.domain.saga.SagaInstancia;
 import br.com.fiap.soat.mecanica.os.domain.saga.SagaPasso;
 import br.com.fiap.soat.mecanica.os.domain.saga.SagaRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,17 +50,26 @@ public final class CenarioSaga {
     public final List<Enviada> enviadas = new ArrayList<>();
     public final List<SagaPasso> passos = new ArrayList<>();
     public final List<MudancaSituacao> historico = new ArrayList<>();
+    public final SimpleMeterRegistry registro = new SimpleMeterRegistry();
+    public final SagaMetrics metricas = new SagaMetrics(registro);
+    public final Clock clock;
     public OrdemServico os;
     public SagaInstancia saga;
 
     public CenarioSaga() {
+        this(RELOGIO);
+    }
+
+    public CenarioSaga(Clock clock) {
+        this.clock = clock;
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
         MensagemFactory fabrica = new MensagemFactory(mapper);
         orquestrador = new SagaOrquestrador(sagaRepository, osRepository,
                 (destino, envelope) -> enviadas.add(new Enviada(destino, envelope)),
                 new ComandosSaga(fabrica), new EventosOrdemServico(fabrica),
                 new SagaTimeoutProperties(Duration.ofMinutes(2), 3, Duration.ofMinutes(1), Duration.ofSeconds(30)),
-                RELOGIO);
+                metricas,
+                clock);
         when(sagaRepository.salvar(any())).thenAnswer(inv -> inv.getArgument(0));
         when(osRepository.salvar(any())).thenAnswer(inv -> inv.getArgument(0));
         org.mockito.Mockito.doAnswer(inv -> {
@@ -71,7 +83,12 @@ public final class CenarioSaga {
     }
 
     public static CenarioSaga em(SituacaoOrdemServico situacao, PassoSaga passo) {
-        CenarioSaga cenario = new CenarioSaga();
+        return em(situacao, passo, RELOGIO);
+    }
+
+    /** A Saga nasce com o {@code RELOGIO} (prazos relativos a ele); o orquestrador usa {@code clock}. */
+    public static CenarioSaga em(SituacaoOrdemServico situacao, PassoSaga passo, Clock clock) {
+        CenarioSaga cenario = new CenarioSaga(clock);
         cenario.os = osEm(situacao);
         cenario.saga = SagaInstancia.iniciar(cenario.os.getId(), Duration.ofMinutes(2), RELOGIO);
         cenario.saga.avancarPara(passo, null, RELOGIO);

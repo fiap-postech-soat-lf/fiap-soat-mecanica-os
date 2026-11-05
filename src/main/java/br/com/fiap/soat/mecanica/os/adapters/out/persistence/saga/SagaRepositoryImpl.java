@@ -6,6 +6,7 @@ import br.com.fiap.soat.mecanica.os.domain.saga.SagaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,6 +28,11 @@ public class SagaRepositoryImpl implements SagaRepository {
     @Override
     public Optional<SagaInstancia> buscarPorOsId(UUID osId) {
         return instanciaJpaRepository.findByOsId(osId).map(mapper::toDomain);
+    }
+
+    @Override
+    public List<SagaInstancia> travarVencidas(Instant agora, int limite) {
+        return instanciaJpaRepository.travarVencidas(agora, limite).stream().map(mapper::toDomain).toList();
     }
 
     @Override

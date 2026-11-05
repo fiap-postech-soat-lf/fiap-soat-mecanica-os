@@ -1,6 +1,41 @@
 # infra/ do serviço os
 
-O Terraform deste serviço começa na fase em que ele é implementado. Enquanto não houver `*.tf` aqui, o CI e o CD pulam o Terraform.
+Terraform do OS Service, aplicado pelo `servico-cd.yml@v1` antes do build da imagem (F4, T07).
+
+## Recursos
+
+| Arquivo | Recursos |
+|---|---|
+| `data.tf` | Lê do SSM a VPC, as subnets e o SG dos nodes (`/mecanica/k8s/*`) e os parâmetros do Identity, do Execução e do Billing (tabela abaixo). Leitura direta: se faltar algum, o `plan` falha com `ParameterNotFound` |
+| `ecr.tf` | Repositório `mecanica-os` (`MUTABLE`, `force_delete`, scan on push) e lifecycle das 10 imagens mais recentes |
+| `rds.tf` | Módulo `fiap-soat-mecanica-db//modules/rds-postgres?ref=v1`: RDS, secret e SG `mecanica-os-db`, banco `os_db` |
+| `sns.tf` | Tópico `mecanica-os-eventos`, SSM `/mecanica/os/os-eventos-topic-arn` e a assinatura `os-eventos → identity-notificacoes` (raw), que é do OS por exceção (F4-a, ADR-F4-03) |
+| `sqs.tf` | Fila `mecanica-os-saga-respostas` (visibility 30 s, retenção 4 dias) + DLQ, redrive após 5 recebimentos; policy permitindo `sns:SendMessage` dos tópicos do Execução e do Billing; as duas assinaturas raw |
+
+- A policy da fila de notificações (que permite o `os-eventos` publicar nela) fica no `infra/` do Identity, que monta o ARN do tópico a partir do nome.
+- Ordem B4: `identity → execucao → billing → os → -auth`. O OS é o último dos serviços porque lê o SSM dos três anteriores.
+- Tudo é destrutível sem sobra: ECR com `force_delete`, RDS sem snapshot final (regras 3.3 do plano da F2).
+
+## Parâmetros SSM
+
+| Parâmetro | Operação | Dono |
+|---|---|---|
+| `/mecanica/k8s/{vpc-id, subnet-ids, node-security-group-id}` | lê | k8s |
+| `/mecanica/identity/jwt-public-key` | lê (`JWT_PUBLIC_KEY`) | identity |
+| `/mecanica/identity/notificacoes-queue-arn` | lê (endpoint da assinatura) | identity |
+| `/mecanica/execucao/execucao-eventos-topic-arn` | lê (assinatura e policy) | execucao |
+| `/mecanica/execucao/execucao-comandos-queue-url` | lê (`MESSAGING_DESTINO_EXECUCAO_COMANDOS`) | execucao |
+| `/mecanica/billing/billing-eventos-topic-arn` | lê (assinatura e policy) | billing |
+| `/mecanica/billing/billing-comandos-queue-url` | lê (`MESSAGING_DESTINO_BILLING_COMANDOS`) | billing |
+| `/mecanica/os/os-eventos-topic-arn` | **publica** | os |
+
+## Comandos
+
+```bash
+terraform -chdir=infra init -backend=false
+terraform -chdir=infra validate
+terraform -chdir=infra test   # provider aws mockado, sem credencial
+```
 
 ## Contrato com o CD (`servico-cd.yml@v1`)
 
@@ -16,6 +51,19 @@ O `infra/outputs.tf` precisa expor:
 - Provider AWS `~> 6.0`, `required_version = ">= 1.10.0, < 2.0.0"`.
 - O CD passa `TF_VAR_mp_access_token` e `TF_VAR_mp_webhook_secret`. Variáveis não declaradas são ignoradas.
 - Nomes de filas, tópicos, RDS e SSM seguem a tabela 3.4 do plano da F1.
+
+Valores atuais do `app_config` (9 chaves) e do `app_secrets` (2 chaves):
+
+| Output | Chave | Valor |
+|---|---|---|
+| `app_config` | `SPRING_DATASOURCE_URL` | `jdbc_url` do módulo (`os_db`, `sslmode=require`) |
+| `app_config` | `AWS_REGION` | `var.aws_region` |
+| `app_config` | `JWT_PUBLIC_KEY` | PEM do SSM do Identity com `\n` escapado (`--from-env-file` não aceita valor multilinha) |
+| `app_config` | `APP_IDENTITY_BASE_URL` | `http://mecanica-identity.mecanica.svc.cluster.local:8080` (DNS do cluster) |
+| `app_config` | `APP_MESSAGING_CONSUMIDOR_FILAS`, `APP_MESSAGING_DLQS` | URL da `os-saga-respostas` e da sua DLQ |
+| `app_config` | `MESSAGING_DESTINO_EXECUCAO_COMANDOS`, `MESSAGING_DESTINO_BILLING_COMANDOS` | URLs das filas de comando, lidas do SSM dos donos |
+| `app_config` | `MESSAGING_DESTINO_OS_EVENTOS` | ARN do tópico `mecanica-os-eventos` |
+| `app_secrets` | `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` | Usuário e senha master do RDS |
 
 ### Chaves de mensageria no `app_config`
 

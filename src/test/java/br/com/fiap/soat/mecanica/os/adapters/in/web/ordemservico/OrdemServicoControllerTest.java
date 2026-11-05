@@ -2,11 +2,15 @@ package br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico;
 
 import br.com.fiap.soat.mecanica.os.adapters.in.web.security.UsuarioAutenticadoAdapter;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.dto.OrdemServicoDetalhe;
+import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.AbrirOrdemServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.BuscarHistoricoOrdemServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.BuscarOrdemServicoPorIdUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.ConsultarSituacaoPorPlacaUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.ListarMinhasOrdensServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.ListarOrdensServicoUseCase;
+import br.com.fiap.soat.mecanica.os.application.ordemservico.exception.IdentityIndisponivelException;
+import br.com.fiap.soat.mecanica.os.application.ordemservico.exception.IntegracaoIdentityException;
+import br.com.fiap.soat.mecanica.os.application.ordemservico.exception.VeiculoInvalidoException;
 import br.com.fiap.soat.mecanica.os.domain.Pagina;
 import br.com.fiap.soat.mecanica.os.domain.Paginacao;
 import br.com.fiap.soat.mecanica.os.domain.exception.RecursoNaoEncontradoException;
@@ -22,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -34,9 +39,12 @@ import static br.com.fiap.soat.mecanica.os.support.TestDataFactory.CLIENTE_ID;
 import static br.com.fiap.soat.mecanica.os.support.TestDataFactory.PLACA;
 import static br.com.fiap.soat.mecanica.os.support.TestDataFactory.RELOGIO;
 import static br.com.fiap.soat.mecanica.os.support.TestDataFactory.osEm;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -47,6 +55,8 @@ class OrdemServicoControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+    @MockitoBean
+    private AbrirOrdemServicoUseCase abrirUseCase;
     @MockitoBean
     private ListarOrdensServicoUseCase listarUseCase;
     @MockitoBean
@@ -201,5 +211,60 @@ class OrdemServicoControllerTest {
                         .header("Authorization", "Bearer " + JwtTestTokens.cliente(CLIENTE_ID)))
                 .andExpect(status().isForbidden());
         verifyNoInteractions(listarUseCase, buscarPorIdUseCase, historicoUseCase);
+    }
+
+    private static final String CORPO_ABERTURA = "{\"veiculoId\":\"44444444-4444-4444-4444-444444444444\",\"observacao\":\"Barulho\"}";
+
+    @Test
+    @DisplayName("POST /ordem-servicos abre a OS: 201 com Location e situação RECEBIDA")
+    void abre() throws Exception {
+        OrdemServico os = osEm(SituacaoOrdemServico.RECEBIDA);
+        when(abrirUseCase.executar(UUID.fromString("44444444-4444-4444-4444-444444444444"), "Barulho")).thenReturn(os);
+
+        mockMvc.perform(post("/ordem-servicos").header("Authorization", funcionario("ATENDENTE"))
+                        .contentType(MediaType.APPLICATION_JSON).content(CORPO_ABERTURA))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", org.hamcrest.Matchers.endsWith("/ordem-servicos/" + os.getId())))
+                .andExpect(jsonPath("$.id").value(os.getId().toString()))
+                .andExpect(jsonPath("$.situacao").value("RECEBIDA"));
+    }
+
+    @Test
+    @DisplayName("POST sem veiculoId responde 400 e não chama o caso de uso")
+    void aberturaSemVeiculo() throws Exception {
+        mockMvc.perform(post("/ordem-servicos").header("Authorization", funcionario("MECANICO"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"observacao\":\"x\"}"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(abrirUseCase);
+    }
+
+    @Test
+    @DisplayName("Veículo inválido → 422, Identity fora → 503, token recusado → 502")
+    void errosDoIdentity() throws Exception {
+        when(abrirUseCase.executar(any(), any()))
+                .thenThrow(new VeiculoInvalidoException("Veículo não encontrado"))
+                .thenThrow(new IdentityIndisponivelException("Identity indisponível"))
+                .thenThrow(new IntegracaoIdentityException("O Identity recusou a chamada (HTTP 401)"));
+
+        for (var esperado : List.of(
+                java.util.Map.entry(422, "VEICULO_INVALIDO"),
+                java.util.Map.entry(503, "IDENTITY_INDISPONIVEL"),
+                java.util.Map.entry(502, "INTEGRACAO_IDENTITY"))) {
+            mockMvc.perform(post("/ordem-servicos").header("Authorization", funcionario("ATENDENTE"))
+                            .contentType(MediaType.APPLICATION_JSON).content(CORPO_ABERTURA))
+                    .andExpect(status().is(esperado.getKey()))
+                    .andExpect(jsonPath("$.erro").value(esperado.getValue()));
+        }
+    }
+
+    @Test
+    @DisplayName("POST: CLIENTE recebe 403 e sem token, 401")
+    void abrirExigeFuncionario() throws Exception {
+        mockMvc.perform(post("/ordem-servicos").contentType(MediaType.APPLICATION_JSON).content(CORPO_ABERTURA))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/ordem-servicos").header("Authorization", "Bearer " + JwtTestTokens.cliente(CLIENTE_ID))
+                        .contentType(MediaType.APPLICATION_JSON).content(CORPO_ABERTURA))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(abrirUseCase);
     }
 }

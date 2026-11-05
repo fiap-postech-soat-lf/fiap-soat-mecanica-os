@@ -1,5 +1,8 @@
 package br.com.fiap.soat.mecanica.os.config.exception;
 
+import br.com.fiap.soat.mecanica.os.application.ordemservico.exception.IdentityIndisponivelException;
+import br.com.fiap.soat.mecanica.os.application.ordemservico.exception.IntegracaoIdentityException;
+import br.com.fiap.soat.mecanica.os.application.ordemservico.exception.VeiculoInvalidoException;
 import br.com.fiap.soat.mecanica.os.domain.exception.RecursoNaoEncontradoException;
 import br.com.fiap.soat.mecanica.os.domain.exception.RegraNegocioException;
 import com.fasterxml.jackson.databind.JsonMappingException;
@@ -137,6 +140,25 @@ public class GlobalExceptionHandler {
                         null
                 )
         );
+    }
+
+    @ExceptionHandler(VeiculoInvalidoException.class)
+    public ResponseEntity<ErrorResponse> handleVeiculoInvalido(VeiculoInvalidoException ex) {
+        log.atInfo().addKeyValue("event", "veiculo_invalido")
+                .addKeyValue("reason", ex.getMessage()).log("Vehicle rejected by Identity");
+        return ResponseEntity.status(422).body(new ErrorResponse(422, "VEICULO_INVALIDO", ex.getMessage(), null, null, null));
+    }
+
+    @ExceptionHandler(IdentityIndisponivelException.class)
+    public ResponseEntity<ErrorResponse> handleIdentityIndisponivel(IdentityIndisponivelException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+                new ErrorResponse(503, "IDENTITY_INDISPONIVEL", ex.getMessage(), null, null, null));
+    }
+
+    @ExceptionHandler(IntegracaoIdentityException.class)
+    public ResponseEntity<ErrorResponse> handleIntegracaoIdentity(IntegracaoIdentityException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(
+                new ErrorResponse(502, "INTEGRACAO_IDENTITY", ex.getMessage(), null, null, null));
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

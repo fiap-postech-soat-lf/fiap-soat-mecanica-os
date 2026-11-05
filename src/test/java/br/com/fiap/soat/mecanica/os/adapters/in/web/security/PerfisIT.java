@@ -66,6 +66,8 @@ class PerfisIT extends IntegracaoTest {
                 new Rota(HttpMethod.GET, "/ordem-servicos", null, atendenteOuMecanico),
                 new Rota(HttpMethod.GET, "/ordem-servicos/" + id, null, atendenteOuMecanico),
                 new Rota(HttpMethod.GET, "/ordem-servicos/" + id + "/historico", null, atendenteOuMecanico),
+                new Rota(HttpMethod.PATCH, "/ordem-servicos/" + id + "/cancelar", null, atendenteOuMecanico),
+                new Rota(HttpMethod.PATCH, "/ordem-servicos/" + id + "/revisar-orcamento", null, atendenteOuMecanico),
                 new Rota(HttpMethod.GET, "/ordem-servicos/minhas", null, Set.of(CLIENTE)),
                 new Rota(HttpMethod.POST, "/servicos", novoServico, soMecanico),
                 new Rota(HttpMethod.PUT, "/servicos/" + SERVICO_SEED, servicoAlterado, soMecanico),

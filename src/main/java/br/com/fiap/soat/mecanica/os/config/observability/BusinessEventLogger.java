@@ -44,10 +44,9 @@ public final class BusinessEventLogger {
 
     public static void sagaPasso(UUID sagaId, UUID ordemServicoId, PassoSaga passo, String tipoMensagem,
                                  String direcao) {
-        log.atInfo()
-                .addKeyValue("event", "saga_passo")
-                .addKeyValue("sagaId", sagaId)
-                .addKeyValue("osId", ordemServicoId)
+        Mdc.comSagaEOs(log.atInfo()
+                .addKeyValue("event", "saga_passo"),
+                sagaId, ordemServicoId)
                 .addKeyValue("passo", passo)
                 .addKeyValue("tipoMensagem", tipoMensagem)
                 .addKeyValue("direcao", direcao)
@@ -56,20 +55,18 @@ public final class BusinessEventLogger {
 
     /** Saga que esgotou as tentativas: precisa de ação manual (alerta). */
     public static void sagaFalhou(UUID sagaId, UUID ordemServicoId, PassoSaga passo, int tentativas) {
-        log.atError()
-                .addKeyValue("event", "saga_falhou")
-                .addKeyValue("sagaId", sagaId)
-                .addKeyValue("osId", ordemServicoId)
+        Mdc.comSagaEOs(log.atError()
+                .addKeyValue("event", "saga_falhou"),
+                sagaId, ordemServicoId)
                 .addKeyValue("passo", passo)
                 .addKeyValue("tentativas", tentativas)
                 .log("Saga failed");
     }
 
     public static void sagaFinalizada(UUID sagaId, UUID ordemServicoId, SagaStatus status) {
-        log.atInfo()
-                .addKeyValue("event", "saga_finalizada")
-                .addKeyValue("sagaId", sagaId)
-                .addKeyValue("osId", ordemServicoId)
+        Mdc.comSagaEOs(log.atInfo()
+                .addKeyValue("event", "saga_finalizada"),
+                sagaId, ordemServicoId)
                 .addKeyValue("status", status)
                 .log("Saga finished");
     }

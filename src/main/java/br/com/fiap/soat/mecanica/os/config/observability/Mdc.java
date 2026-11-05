@@ -1,10 +1,12 @@
 package br.com.fiap.soat.mecanica.os.config.observability;
 
 import org.slf4j.MDC;
+import org.slf4j.spi.LoggingEventBuilder;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Chaves de MDC usadas nos logs estruturados e helpers para abrir e fechar escopos.
@@ -24,6 +26,24 @@ public final class Mdc {
 
     public static String correlationId() {
         return MDC.get(CORRELATION_ID);
+    }
+
+    /**
+     * Acrescenta {@code sagaId} e {@code osId} ao evento de log apenas quando o MDC ainda nao os tem.
+     * O encoder estruturado escreve o MDC e os pares chave-valor no mesmo objeto JSON e descarta a
+     * linha inteira se uma chave se repetir (consumidor SQS, que ja abre o MDC com os dois ids).
+     */
+    public static LoggingEventBuilder comSagaEOs(LoggingEventBuilder evento, UUID sagaId, UUID osId) {
+        return comChaveAusente(comChaveAusente(evento, SAGA_ID, sagaId), OS_ID, osId);
+    }
+
+    /** Idem para eventos que so conhecem o {@code osId}. */
+    public static LoggingEventBuilder comOs(LoggingEventBuilder evento, UUID osId) {
+        return comChaveAusente(evento, OS_ID, osId);
+    }
+
+    private static LoggingEventBuilder comChaveAusente(LoggingEventBuilder evento, String chave, UUID valor) {
+        return MDC.get(chave) == null ? evento.addKeyValue(chave, valor) : evento;
     }
 
     /**

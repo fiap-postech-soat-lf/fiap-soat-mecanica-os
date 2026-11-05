@@ -89,4 +89,34 @@ class BusinessEventLoggerTest {
         assertThat(valor(unico(), "event")).isEqualTo("saga_finalizada");
         assertThat(valor(unico(), "status")).isEqualTo(SagaStatus.COMPENSADA);
     }
+
+    @Test
+    void naoRepeteSagaIdEOsIdQuandoOMdcJaOsTem() {
+        UUID saga = UUID.randomUUID();
+        UUID os = UUID.randomUUID();
+
+        try (var ignored = Mdc.abrir(java.util.Map.of(Mdc.SAGA_ID, saga, Mdc.OS_ID, os))) {
+            BusinessEventLogger.sagaPasso(saga, os, PassoSaga.RESERVAR_PECAS, "PecasReservadas", "RECEBIDO");
+            BusinessEventLogger.sagaFalhou(saga, os, PassoSaga.RESERVAR_PECAS, 3);
+            BusinessEventLogger.sagaFinalizada(saga, os, SagaStatus.CONCLUIDA);
+        }
+
+        assertThat(appender.list).hasSize(3).allSatisfy(evento -> {
+            assertThat(valor(evento, "sagaId")).isNull();
+            assertThat(valor(evento, "osId")).isNull();
+            assertThat(evento.getMDCPropertyMap()).containsEntry("sagaId", saga.toString())
+                    .containsEntry("osId", os.toString());
+        });
+    }
+
+    @Test
+    void incluiSagaIdEOsIdQuandoOMdcEstaVazio() {
+        UUID saga = UUID.randomUUID();
+        UUID os = UUID.randomUUID();
+
+        BusinessEventLogger.sagaPasso(saga, os, PassoSaga.RESERVAR_PECAS, "ReservarPecas", "ENVIADO");
+
+        assertThat(valor(unico(), "sagaId")).isEqualTo(saga);
+        assertThat(valor(unico(), "osId")).isEqualTo(os);
+    }
 }

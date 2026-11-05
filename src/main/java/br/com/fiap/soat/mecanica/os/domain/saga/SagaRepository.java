@@ -1,5 +1,6 @@
 package br.com.fiap.soat.mecanica.os.domain.saga;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -10,6 +11,12 @@ public interface SagaRepository {
     SagaInstancia salvar(SagaInstancia saga);
 
     Optional<SagaInstancia> buscarPorOsId(UUID osId);
+
+    /**
+     * Instâncias INICIADA ou COMPENSANDO com o prazo vencido em {@code agora}, travadas até o fim da transação
+     * (SKIP LOCKED: cada réplica pega um lote diferente). Exige transação ativa.
+     */
+    List<SagaInstancia> travarVencidas(Instant agora, int limite);
 
     void registrarPasso(SagaPasso passo);
 

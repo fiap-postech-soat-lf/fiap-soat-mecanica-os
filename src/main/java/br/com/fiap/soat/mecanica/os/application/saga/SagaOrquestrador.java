@@ -41,6 +41,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -73,6 +74,7 @@ public class SagaOrquestrador {
 
     private static final int LIMITE_MOTIVO = 500;
     private static final String MOTIVO_DESISTENCIA = "Cancelada a pedido do cliente";
+    private static final String MOTIVO_EXPIRADO = "Orçamento expirado sem resposta do cliente";
     private static final String MOTIVO_REVISAO = "Revisão do orçamento pedida pelo cliente";
 
     private final SagaRepository sagaRepository;
@@ -81,6 +83,7 @@ public class SagaOrquestrador {
     private final ComandosSaga comandos;
     private final EventosOrdemServico eventos;
     private final SagaTimeoutProperties timeouts;
+    private final SagaMetrics metricas;
     private final Clock clock;
 
     // ---------------------------------------------------------------- respostas do Execução
@@ -167,6 +170,7 @@ public class SagaOrquestrador {
         saga.definirPrazo(null, clock);
         if (saga.getStatus() == SagaStatus.COMPENSANDO) {
             saga.mudarStatus(SagaStatus.COMPENSADA, clock);
+            metricas.compensada(saga.getPassoAtual());
             BusinessEventLogger.sagaFinalizada(saga.getId(), saga.getOsId(), saga.getStatus());
         } else if (ctx.getDiagnosticoEmEspera() != null && saga.getPassoAtual() == AGUARDAR_DIAGNOSTICO) {
             List<ItemDiagnostico> itens = ctx.getDiagnosticoEmEspera();
@@ -233,14 +237,18 @@ public class SagaOrquestrador {
         if (saga == null) {
             return;
         }
+        falharOrcamento(saga, resposta.motivo() == null ? "Falha ao gerar o orçamento" : resposta.motivo());
+        sagaRepository.salvar(saga);
+    }
+
+    /** Orçamento que falhou (ou nunca respondeu): volta ao diagnóstico e libera a reserva, se houver. */
+    private void falharOrcamento(SagaInstancia saga, String motivo) {
         OrdemServico os = carregarOs(saga);
-        String motivo = limitar(resposta.motivo() == null ? "Falha ao gerar o orçamento" : resposta.motivo());
-        aplicar(os, saga, os.registrarProblemaNoDiagnostico(motivo, clock));
+        aplicar(os, saga, os.registrarProblemaNoDiagnostico(limitar(motivo), clock));
         saga.avancarPara(AGUARDAR_DIAGNOSTICO, null, clock);
         if (saga.getContexto().isReservaAtiva()) {
             liberarReserva(saga, MotivoLiberacao.ORCAMENTO_FALHOU);
         }
-        sagaRepository.salvar(saga);
     }
 
     public void orcamentoAprovado(UUID messageId, OrcamentoAprovado resposta) {
@@ -257,14 +265,16 @@ public class SagaOrquestrador {
     public void orcamentoRecusado(UUID messageId, OrcamentoRecusado resposta) {
         SagaInstancia saga = aceitar(resposta.osId(), "OrcamentoRecusado", messageId, AGUARDAR_APROVACAO);
         if (saga != null) {
-            cancelarPorDecisao(saga, "Orçamento recusado pelo cliente", MotivoLiberacao.ORCAMENTO_RECUSADO);
+            cancelarPorDecisao(saga, "Orçamento recusado pelo cliente", MotivoLiberacao.ORCAMENTO_RECUSADO, false);
+            sagaRepository.salvar(saga);
         }
     }
 
     public void orcamentoExpirado(UUID messageId, OrcamentoExpirado resposta) {
         SagaInstancia saga = aceitar(resposta.osId(), "OrcamentoExpirado", messageId, AGUARDAR_APROVACAO);
         if (saga != null) {
-            cancelarPorDecisao(saga, "Orçamento expirado sem resposta do cliente", MotivoLiberacao.ORCAMENTO_EXPIRADO);
+            cancelarPorDecisao(saga, MOTIVO_EXPIRADO, MotivoLiberacao.ORCAMENTO_EXPIRADO, false);
+            sagaRepository.salvar(saga);
         }
     }
 
@@ -307,6 +317,7 @@ public class SagaOrquestrador {
         saga.getContexto().setPagamentoId(resposta.pagamentoId());
         saga.avancarPara(FIM, null, clock);
         saga.mudarStatus(SagaStatus.CONCLUIDA, clock);
+        metricas.concluida(FIM);
         BusinessEventLogger.sagaFinalizada(saga.getId(), saga.getOsId(), saga.getStatus());
         sagaRepository.salvar(saga);
     }
@@ -329,6 +340,7 @@ public class SagaOrquestrador {
         UUID orcamentoId = ctx.getOrcamentoId();
         String motivoFinal = motivo == null || motivo.isBlank() ? MOTIVO_DESISTENCIA : limitar(motivo);
 
+        PassoSaga origem = saga.getPassoAtual();
         cancelarOs(os, saga, motivoFinal);
         ctx.setDiagnosticoEmEspera(null);
         saga.avancarPara(FIM, ctx.isLiberacaoPendente() ? saga.getPrazoEm() : null, clock);
@@ -339,7 +351,7 @@ public class SagaOrquestrador {
         if (liberar) {
             liberarReserva(saga, MotivoLiberacao.DESISTENCIA);
         }
-        encerrarCancelamento(saga);
+        encerrarCancelamento(saga, origem);
         return new OrdemServicoDetalhe(os, sagaRepository.salvar(saga));
     }
 
@@ -371,24 +383,95 @@ public class SagaOrquestrador {
         return new OrdemServicoDetalhe(os, sagaRepository.salvar(saga));
     }
 
-    // ---------------------------------------------------------------- internos
+    // ---------------------------------------------------------------- timeouts (tabela 6.3)
 
-    /** Recusa ou expiração do orçamento: a OS vira CANCELADA na hora e a reserva é desfeita (F4-e). */
-    private void cancelarPorDecisao(SagaInstancia saga, String motivo, MotivoLiberacao motivoLiberacao) {
-        OrdemServico os = carregarOs(saga);
-        cancelarOs(os, saga, motivo);
-        saga.avancarPara(FIM, null, clock);
-        if (saga.getContexto().isReservaAtiva()) {
-            liberarReserva(saga, motivoLiberacao);
+    /**
+     * Trata uma instância com o prazo vencido: reenvia o comando enquanto houver tentativas (o total inclui o envio
+     * original) e, esgotadas, aplica o efeito da tabela 6.3. Antes do pivô a OS se recupera ou é cancelada; depois dele
+     * só há recuperação para frente (a Saga falha e a OS fica onde está, para ação manual).
+     */
+    public void tratarTimeout(SagaInstancia saga) {
+        ComandoEnviado ultimo = saga.getContexto().getUltimoComando();
+        sagaRepository.registrarPasso(SagaPasso.novo(saga.getId(), saga.getPassoAtual(),
+                ultimo == null ? null : ultimo.tipo(), DirecaoPasso.TIMEOUT,
+                ultimo == null ? null : ultimo.messageId(), Map.of("tentativas", saga.getTentativas()),
+                clock.instant()));
+        BusinessEventLogger.sagaPasso(saga.getId(), saga.getOsId(), saga.getPassoAtual(),
+                ultimo == null ? "-" : ultimo.tipo(), DirecaoPasso.TIMEOUT.name());
+
+        if (saga.getContexto().isLiberacaoPendente()) {
+            reenviarOuEsgotar(saga, false, () -> falhar(saga)); // a OS não muda
+        } else {
+            switch (saga.getPassoAtual()) {
+                case ABRIR_DIAGNOSTICO -> reenviarOuEsgotar(saga, false, () -> {
+                    cancelarOs(carregarOs(saga), saga, "Execução não respondeu");
+                    falhar(saga);
+                });
+                case RESERVAR_PECAS -> reenviarOuEsgotar(saga, false, () -> {
+                    OrdemServico os = carregarOs(saga);
+                    aplicar(os, saga, os.registrarProblemaNoDiagnostico(
+                            "Execução não respondeu à reserva de peças", clock));
+                    saga.avancarPara(AGUARDAR_DIAGNOSTICO, null, clock);
+                    liberarReserva(saga, MotivoLiberacao.REVISAO); // por garantia
+                });
+                case GERAR_ORCAMENTO -> reenviarOuEsgotar(saga, false, () ->
+                        falharOrcamento(saga, "Billing não respondeu à geração do orçamento"));
+                case AGUARDAR_APROVACAO -> // rede de segurança: o Billing é dono do TTL (F4-i)
+                        cancelarPorDecisao(saga, MOTIVO_EXPIRADO, MotivoLiberacao.ORCAMENTO_EXPIRADO, true);
+                case INICIAR_EXECUCAO, SOLICITAR_PAGAMENTO -> reenviarOuEsgotar(saga, true, () -> falhar(saga));
+                default -> saga.definirPrazo(null, clock); // passo sem prazo próprio: nada a esperar
+            }
         }
-        encerrarCancelamento(saga);
         sagaRepository.salvar(saga);
     }
 
-    private void encerrarCancelamento(SagaInstancia saga) {
+    private void reenviarOuEsgotar(SagaInstancia saga, boolean backoff, Runnable esgotado) {
+        ComandoEnviado ultimo = saga.getContexto().getUltimoComando();
+        if (ultimo == null || ultimo.payload() == null || saga.getTentativas() + 1 >= timeouts.tentativas()) {
+            esgotado.run();
+            return;
+        }
+        // backoff dos passos depois do pivô: 2 min no envio original, depois 4 e 8
+        Duration espera = backoff ? timeouts.comando().multipliedBy(1L << (saga.getTentativas() + 1))
+                : timeouts.comando();
+        saga.registrarTentativa(clock.instant().plus(espera), clock);
+        enviar(saga, ComandosSaga.destinoDe(ultimo.tipo()), comandos.reenviar(ultimo, saga.getId(), saga.getOsId()));
+    }
+
+    /** Esgotou as tentativas: a Saga falha e fica sem prazo, à espera de ação manual. */
+    private void falhar(SagaInstancia saga) {
+        saga.definirPrazo(null, clock);
+        saga.mudarStatus(SagaStatus.FALHOU, clock);
+        metricas.falhou(saga.getPassoAtual());
+        BusinessEventLogger.sagaFalhou(saga.getId(), saga.getOsId(), saga.getPassoAtual(), saga.getTentativas());
+        BusinessEventLogger.sagaFinalizada(saga.getId(), saga.getOsId(), saga.getStatus());
+    }
+
+    // ---------------------------------------------------------------- internos
+
+    /** Recusa ou expiração do orçamento: a OS vira CANCELADA na hora e a reserva é desfeita (F4-e). */
+    private void cancelarPorDecisao(SagaInstancia saga, String motivo, MotivoLiberacao motivoLiberacao,
+                                    boolean cancelarOrcamento) {
+        OrdemServico os = carregarOs(saga);
+        PassoSaga origem = saga.getPassoAtual();
+        cancelarOs(os, saga, motivo);
+        saga.avancarPara(FIM, null, clock);
+        UUID orcamentoId = saga.getContexto().getOrcamentoId();
+        if (cancelarOrcamento && orcamentoId != null) {
+            enviar(saga, ComandosSaga.DESTINO_BILLING,
+                    comandos.cancelarOrcamento(saga.getId(), saga.getOsId(), orcamentoId, motivo));
+        }
+        if (saga.getContexto().isReservaAtiva()) {
+            liberarReserva(saga, motivoLiberacao);
+        }
+        encerrarCancelamento(saga, origem);
+    }
+
+    private void encerrarCancelamento(SagaInstancia saga, PassoSaga origem) {
         boolean pendente = saga.getContexto().isLiberacaoPendente();
         saga.mudarStatus(pendente ? SagaStatus.COMPENSANDO : SagaStatus.COMPENSADA, clock);
         if (!pendente) {
+            metricas.compensada(origem);
             BusinessEventLogger.sagaFinalizada(saga.getId(), saga.getOsId(), saga.getStatus());
         }
     }
@@ -433,6 +516,7 @@ public class SagaOrquestrador {
     private void cancelarOs(OrdemServico os, SagaInstancia saga, String motivo) {
         MudancaSituacao mudanca = os.cancelar(motivo, clock);
         ordemServicoRepository.salvar(os);
+        medirTempoNaSituacao(os, mudanca);
         ordemServicoRepository.registrarHistorico(os.getId(), mudanca);
         outbox.registrar(EventosOrdemServico.DESTINO, eventos.ordemServicoCancelada(saga.getId(), os, mudanca));
         BusinessEventLogger.situacaoOrdemServicoAlterada(os.getId(), mudanca.de(), mudanca.para());
@@ -441,14 +525,26 @@ public class SagaOrquestrador {
 
     private void aplicar(OrdemServico os, SagaInstancia saga, MudancaSituacao mudanca) {
         ordemServicoRepository.salvar(os);
+        medirTempoNaSituacao(os, mudanca);
         ordemServicoRepository.registrarHistorico(os.getId(), mudanca);
         outbox.registrar(EventosOrdemServico.DESTINO, eventos.situacaoAlterada(saga.getId(), os, mudanca));
         BusinessEventLogger.situacaoOrdemServicoAlterada(os.getId(), mudanca.de(), mudanca.para());
     }
 
+    /** Tempo na situação que a OS está deixando: da última entrada nela, no histórico, até esta mudança. */
+    private void medirTempoNaSituacao(OrdemServico os, MudancaSituacao mudanca) {
+        if (mudanca.de() == null || mudanca.de() == mudanca.para()) {
+            return;
+        }
+        ordemServicoRepository.buscarHistorico(os.getId()).stream()
+                .filter(h -> h.para() == mudanca.de())
+                .reduce((primeira, ultima) -> ultima)
+                .ifPresent(h -> metricas.tempoNaSituacao(mudanca.de(), Duration.between(h.ocorridaEm(), mudanca.em())));
+    }
+
     private void enviar(SagaInstancia saga, String destino, MensagemEnvelope comando) {
         outbox.registrar(destino, comando);
-        saga.getContexto().setUltimoComando(new ComandoEnviado(comando.type(), comando.messageId()));
+        saga.getContexto().setUltimoComando(new ComandoEnviado(comando.type(), comando.messageId(), comando.payload()));
         registrarPasso(saga, comando.type(), DirecaoPasso.ENVIADO, comando.messageId());
     }
 

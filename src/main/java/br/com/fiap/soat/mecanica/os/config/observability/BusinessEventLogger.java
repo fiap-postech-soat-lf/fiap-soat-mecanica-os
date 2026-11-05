@@ -54,6 +54,17 @@ public final class BusinessEventLogger {
                 .log("Saga step");
     }
 
+    /** Saga que esgotou as tentativas: precisa de ação manual (alerta). */
+    public static void sagaFalhou(UUID sagaId, UUID ordemServicoId, PassoSaga passo, int tentativas) {
+        log.atError()
+                .addKeyValue("event", "saga_falhou")
+                .addKeyValue("sagaId", sagaId)
+                .addKeyValue("osId", ordemServicoId)
+                .addKeyValue("passo", passo)
+                .addKeyValue("tentativas", tentativas)
+                .log("Saga failed");
+    }
+
     public static void sagaFinalizada(UUID sagaId, UUID ordemServicoId, SagaStatus status) {
         log.atInfo()
                 .addKeyValue("event", "saga_finalizada")

@@ -1,5 +1,7 @@
 package br.com.fiap.soat.mecanica.os.domain.saga;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -46,6 +48,10 @@ public class ContextoSaga {
     public record PecaReservada(UUID pecaId, int quantidade) {
     }
 
-    public record ComandoEnviado(String tipo, UUID messageId) {
+    /**
+     * O {@code payload} permite reenviar o mesmo comando num envelope novo (F4-h); nulo em registros antigos.
+     * Sem o NON_NULL, o null viraria NullNode na releitura e o Hibernate trataria o contexto como alterado.
+     */
+    public record ComandoEnviado(String tipo, UUID messageId, @JsonInclude(JsonInclude.Include.NON_NULL) JsonNode payload) {
     }
 }

@@ -477,4 +477,36 @@ class SagaOrquestradorTest {
             assertThat(c.passos).isEmpty();
         }
     }
+
+    @Test
+    @DisplayName("métricas: grava o tempo na situação anterior, a partir do histórico, e conta a Saga concluída")
+    void metricas() {
+        var c = CenarioSaga.em(br.com.fiap.soat.mecanica.os.domain.ordemservico.SituacaoOrdemServico.AGUARDANDO_PAGAMENTO,
+                PassoSaga.AGUARDAR_PAGAMENTO);
+        org.mockito.Mockito.when(c.osRepository.buscarHistorico(c.osId())).thenReturn(List.of(
+                new br.com.fiap.soat.mecanica.os.domain.ordemservico.HistoricoSituacao(UUID.randomUUID(), c.osId(),
+                        null, br.com.fiap.soat.mecanica.os.domain.ordemservico.SituacaoOrdemServico.RECEBIDA, null,
+                        AGORA.minusSeconds(7200)),
+                new br.com.fiap.soat.mecanica.os.domain.ordemservico.HistoricoSituacao(UUID.randomUUID(), c.osId(),
+                        br.com.fiap.soat.mecanica.os.domain.ordemservico.SituacaoOrdemServico.FINALIZADA,
+                        br.com.fiap.soat.mecanica.os.domain.ordemservico.SituacaoOrdemServico.AGUARDANDO_PAGAMENTO,
+                        null, AGORA.minusSeconds(600))));
+
+        c.orquestrador.pagamentoConfirmado(msg(), new PagamentoConfirmado(c.osId(), PAGAMENTO, "1", "APROVADO"));
+
+        var timer = c.registro.timer("os.tempo_por_situacao", "situacao", "AGUARDANDO_PAGAMENTO");
+        assertThat(timer.count()).isEqualTo(1);
+        assertThat(timer.totalTime(java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(600.0);
+        assertThat(c.registro.counter("saga.concluida", "passo", "FIM").count()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("métricas: conta a Saga compensada com o passo em que o cancelamento aconteceu")
+    void metricaCompensada() {
+        var c = CenarioSaga.em(AGUARDANDO_APROVACAO, PassoSaga.AGUARDAR_APROVACAO);
+
+        c.orquestrador.orcamentoExpirado(msg(), new OrcamentoExpirado(c.osId(), ORCAMENTO));
+
+        assertThat(c.registro.counter("saga.compensada", "passo", "AGUARDAR_APROVACAO").count()).isEqualTo(1.0);
+    }
 }

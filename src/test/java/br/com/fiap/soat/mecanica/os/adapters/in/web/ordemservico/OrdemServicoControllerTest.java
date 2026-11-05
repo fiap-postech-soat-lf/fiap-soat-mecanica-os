@@ -5,7 +5,9 @@ import br.com.fiap.soat.mecanica.os.application.ordemservico.dto.OrdemServicoDet
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.AbrirOrdemServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.BuscarHistoricoOrdemServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.BuscarOrdemServicoPorIdUseCase;
+import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.CancelarOrdemServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.ConsultarSituacaoPorPlacaUseCase;
+import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.RevisarOrcamentoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.ListarMinhasOrdensServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.ListarOrdensServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.exception.IdentityIndisponivelException;
@@ -40,9 +42,11 @@ import static br.com.fiap.soat.mecanica.os.support.TestDataFactory.PLACA;
 import static br.com.fiap.soat.mecanica.os.support.TestDataFactory.RELOGIO;
 import static br.com.fiap.soat.mecanica.os.support.TestDataFactory.osEm;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -67,6 +71,10 @@ class OrdemServicoControllerTest {
     private ListarMinhasOrdensServicoUseCase minhasUseCase;
     @MockitoBean
     private ConsultarSituacaoPorPlacaUseCase placaUseCase;
+    @MockitoBean
+    private CancelarOrdemServicoUseCase cancelarUseCase;
+    @MockitoBean
+    private RevisarOrcamentoUseCase revisarUseCase;
 
     private static String funcionario(String cargo) {
         return "Bearer " + JwtTestTokens.funcionario(UUID.randomUUID(), cargo);
@@ -158,6 +166,57 @@ class OrdemServicoControllerTest {
                 .andExpect(jsonPath("$[0].para").value("RECEBIDA"))
                 .andExpect(jsonPath("$[1].de").value("RECEBIDA"))
                 .andExpect(jsonPath("$[1].motivo").value("desistência"));
+    }
+
+    @Test
+    @DisplayName("PATCH /{id}/cancelar devolve a OS cancelada e repassa o motivo")
+    void cancela() throws Exception {
+        OrdemServico os = osEm(SituacaoOrdemServico.CANCELADA);
+        when(cancelarUseCase.executar(os.getId(), "desistência")).thenReturn(new OrdemServicoDetalhe(os, null));
+
+        mockMvc.perform(patch("/ordem-servicos/{id}/cancelar", os.getId())
+                        .header("Authorization", funcionario("ATENDENTE"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"motivo\":\"desistência\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.situacao").value("CANCELADA"));
+    }
+
+    @Test
+    @DisplayName("PATCH /{id}/cancelar aceita corpo vazio e uma transição inválida responde 422")
+    void cancelaSemCorpoETransicaoInvalida() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(cancelarUseCase.executar(id, null)).thenThrow(new RegraNegocioException("Ordem de serviço só pode ser cancelada"));
+
+        mockMvc.perform(patch("/ordem-servicos/{id}/cancelar", id).header("Authorization", funcionario("MECANICO")))
+                .andExpect(status().isUnprocessableEntity());
+        verify(cancelarUseCase).executar(id, null);
+    }
+
+    @Test
+    @DisplayName("PATCH /{id}/cancelar com conflito de versão responde 409")
+    void cancelaComConflito() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(cancelarUseCase.executar(id, null))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException("SagaInstanciaEntity", id));
+
+        mockMvc.perform(patch("/ordem-servicos/{id}/cancelar", id).header("Authorization", funcionario("ATENDENTE")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.erro").value("CONFLITO_CONCORRENTE"));
+    }
+
+    @Test
+    @DisplayName("PATCH /{id}/revisar-orcamento devolve a OS em diagnóstico; CLIENTE recebe 403")
+    void revisaOrcamento() throws Exception {
+        OrdemServico os = osEm(SituacaoOrdemServico.EM_DIAGNOSTICO);
+        when(revisarUseCase.executar(os.getId(), null)).thenReturn(new OrdemServicoDetalhe(os, null));
+
+        mockMvc.perform(patch("/ordem-servicos/{id}/revisar-orcamento", os.getId())
+                        .header("Authorization", funcionario("ATENDENTE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.situacao").value("EM_DIAGNOSTICO"));
+        mockMvc.perform(patch("/ordem-servicos/{id}/revisar-orcamento", os.getId())
+                        .header("Authorization", "Bearer " + JwtTestTokens.cliente(CLIENTE_ID)))
+                .andExpect(status().isForbidden());
     }
 
     @Test

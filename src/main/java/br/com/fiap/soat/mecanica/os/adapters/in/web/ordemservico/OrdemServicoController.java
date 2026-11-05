@@ -2,15 +2,18 @@ package br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico;
 
 import br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico.dto.HistoricoSituacaoResponse;
 import br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico.dto.OrdemServicoResponse;
+import br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico.dto.MotivoRequest;
 import br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico.dto.PaginaResponse;
 import br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico.dto.SituacaoPublicaResponse;
 import br.com.fiap.soat.mecanica.os.adapters.in.web.ordemservico.dto.AbrirOrdemServicoRequest;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.AbrirOrdemServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.BuscarHistoricoOrdemServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.BuscarOrdemServicoPorIdUseCase;
+import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.CancelarOrdemServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.ConsultarSituacaoPorPlacaUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.ListarMinhasOrdensServicoUseCase;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.ListarOrdensServicoUseCase;
+import br.com.fiap.soat.mecanica.os.application.ordemservico.usecase.RevisarOrcamentoUseCase;
 import br.com.fiap.soat.mecanica.os.domain.Pagina;
 import br.com.fiap.soat.mecanica.os.domain.Paginacao;
 import br.com.fiap.soat.mecanica.os.domain.ordemservico.OrdemServico;
@@ -24,6 +27,7 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -35,7 +39,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.UUID;
 
-/** Abertura e consultas da OS (cancelar e revisar o orçamento entram com a Saga, T04). */
+/** Abertura, consultas e as duas ações que compensam a Saga (cancelar e revisar o orçamento). */
 @RestController
 @RequestMapping("/ordem-servicos")
 @RequiredArgsConstructor
@@ -50,6 +54,8 @@ public class OrdemServicoController {
     private final BuscarHistoricoOrdemServicoUseCase buscarHistoricoUseCase;
     private final ListarMinhasOrdensServicoUseCase listarMinhasUseCase;
     private final ConsultarSituacaoPorPlacaUseCase consultarSituacaoPorPlacaUseCase;
+    private final CancelarOrdemServicoUseCase cancelarUseCase;
+    private final RevisarOrcamentoUseCase revisarOrcamentoUseCase;
 
     @PostMapping
     @PreAuthorize(ATENDENTE_OU_MECANICO)
@@ -95,6 +101,24 @@ public class OrdemServicoController {
     public ResponseEntity<List<HistoricoSituacaoResponse>> historico(@PathVariable UUID id) {
         return ResponseEntity.ok(buscarHistoricoUseCase.executar(id).stream()
                 .map(OrdemServicoResponseMapper::toResponse).toList());
+    }
+
+    @PatchMapping("/{id}/cancelar")
+    @PreAuthorize(ATENDENTE_OU_MECANICO)
+    @Operation(summary = "Cancelar a ordem de serviço (até o orçamento ser aprovado); a Saga desfaz o que já foi feito")
+    public ResponseEntity<OrdemServicoResponse> cancelar(@PathVariable UUID id,
+                                                         @Valid @RequestBody(required = false) MotivoRequest request) {
+        return ResponseEntity.ok(OrdemServicoResponseMapper.toResponse(
+                cancelarUseCase.executar(id, request == null ? null : request.motivo())));
+    }
+
+    @PatchMapping("/{id}/revisar-orcamento")
+    @PreAuthorize(ATENDENTE_OU_MECANICO)
+    @Operation(summary = "Devolver a ordem de serviço ao diagnóstico para revisar o orçamento (antes da aprovação)")
+    public ResponseEntity<OrdemServicoResponse> revisarOrcamento(
+            @PathVariable UUID id, @Valid @RequestBody(required = false) MotivoRequest request) {
+        return ResponseEntity.ok(OrdemServicoResponseMapper.toResponse(
+                revisarOrcamentoUseCase.executar(id, request == null ? null : request.motivo())));
     }
 
     /** Rota publica (SecurityConfig): so situacao e datas. */

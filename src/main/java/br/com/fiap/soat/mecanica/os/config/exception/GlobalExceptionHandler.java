@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -159,6 +160,15 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleIntegracaoIdentity(IntegracaoIdentityException ex) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(
                 new ErrorResponse(502, "INTEGRACAO_IDENTITY", ex.getMessage(), null, null, null));
+    }
+
+    /** Conflito de versão da Saga numa rota REST: nada foi gravado e o cliente repete a operação (F4, tabela 3.3). */
+    @ExceptionHandler({OptimisticLockingFailureException.class, jakarta.persistence.OptimisticLockException.class})
+    public ResponseEntity<ErrorResponse> handleConflitoConcorrente(Exception ex) {
+        log.atWarn().addKeyValue("event", "conflito_concorrente")
+                .addKeyValue("exceptionType", ex.getClass().getSimpleName()).log("Concurrent modification conflict");
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse(409, "CONFLITO_CONCORRENTE",
+                "A ordem de serviço foi alterada por outra operação; repita a requisição", null, null, null));
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

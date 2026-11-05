@@ -68,6 +68,8 @@ class AbrirOrdemServicoUseCaseTest {
     void preparar() {
         useCase = new AbrirOrdemServicoUseCase(veiculoPort, ordemServicoRepository, sagaRepository, outbox,
                 new MensagemFactory(new ObjectMapper().findAndRegisterModules()), usuarioAutenticado, new br.com.fiap.soat.mecanica.os.application.saga.SagaMetrics(meterRegistry),
+                new br.com.fiap.soat.mecanica.os.config.SagaTimeoutProperties(Duration.ofMinutes(2), 3,
+                        Duration.ofMinutes(1), Duration.ofSeconds(30)),
                 RELOGIO);
         when(usuarioAutenticado.sub()).thenReturn(ATENDENTE_ID);
         when(veiculoPort.consultar(VEICULO_ID)).thenReturn(new Veiculo(VEICULO_ID, PLACA, CLIENTE_ID, true));

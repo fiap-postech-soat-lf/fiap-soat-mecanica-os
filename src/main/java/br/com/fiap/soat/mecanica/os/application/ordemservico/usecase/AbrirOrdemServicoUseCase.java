@@ -6,6 +6,7 @@ import br.com.fiap.soat.mecanica.os.application.ordemservico.port.Veiculo;
 import br.com.fiap.soat.mecanica.os.application.ordemservico.port.VeiculoPort;
 import br.com.fiap.soat.mecanica.os.application.saga.SagaMetrics;
 import br.com.fiap.soat.mecanica.os.application.security.UsuarioAutenticadoPort;
+import br.com.fiap.soat.mecanica.os.config.SagaTimeoutProperties;
 import br.com.fiap.soat.mecanica.os.config.observability.BusinessEventLogger;
 import br.com.fiap.soat.mecanica.os.domain.ordemservico.MudancaSituacao;
 import br.com.fiap.soat.mecanica.os.domain.ordemservico.OrdemServico;
@@ -21,7 +22,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -38,7 +38,6 @@ public class AbrirOrdemServicoUseCase {
     static final String EVENTO_SITUACAO_ALTERADA = "SituacaoOrdemServicoAlterada";
     static final String DESTINO_EXECUCAO_COMANDOS = "execucao-comandos";
     static final String DESTINO_OS_EVENTOS = "os-eventos";
-    private static final Duration PRAZO_COMANDO = Duration.ofMinutes(2);
 
     private final VeiculoPort veiculoPort;
     private final OrdemServicoRepository ordemServicoRepository;
@@ -47,6 +46,7 @@ public class AbrirOrdemServicoUseCase {
     private final MensagemFactory mensagemFactory;
     private final UsuarioAutenticadoPort usuarioAutenticado;
     private final SagaMetrics metricas;
+    private final SagaTimeoutProperties timeouts;
     private final Clock clock;
 
     @Transactional
@@ -58,7 +58,7 @@ public class AbrirOrdemServicoUseCase {
         MudancaSituacao abertura = os.mudancaDeAbertura();
         ordemServicoRepository.registrarHistorico(os.getId(), abertura);
 
-        SagaInstancia saga = SagaInstancia.iniciar(os.getId(), PRAZO_COMANDO, clock);
+        SagaInstancia saga = SagaInstancia.iniciar(os.getId(), timeouts.comando(), clock);
         var comando = mensagemFactory.criar(COMANDO_ABRIR_DIAGNOSTICO, 1, saga.getId(), os.getId(),
                 Map.of("osId", os.getId(), "veiculoId", os.getVeiculoId(), "placa", os.getPlaca()));
         saga.getContexto().setUltimoComando(

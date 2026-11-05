@@ -52,11 +52,11 @@ public abstract class IntegracaoTest {
                     .withServices(Service.SNS, Service.SQS);
 
     /** Faz o papel do Identity (F4-m); porta dinamica. Cada teste que o usa chama {@code resetAll()} antes. */
-    protected static final WireMockServer IDENTITY = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+    public static final WireMockServer IDENTITY = new WireMockServer(WireMockConfiguration.options().dynamicPort());
 
-    protected static final SqsClient SQS;
-    protected static final SnsClient SNS;
-    protected static final Mensageria MENSAGERIA;
+    public static final SqsClient SQS;
+    public static final SnsClient SNS;
+    public static final Mensageria MENSAGERIA;
 
     static {
         POSTGRES.start();
@@ -75,7 +75,8 @@ public abstract class IntegracaoTest {
         registry.add("app.aws.access-key-id", LOCALSTACK::getAccessKey);
         registry.add("app.aws.secret-access-key", LOCALSTACK::getSecretKey);
         registry.add("app.messaging.consumidor.enabled", () -> "true");
-        registry.add("app.messaging.consumidor.filas", MENSAGERIA::filaEntrada);
+        // a fila do esqueleto e a de respostas da Saga (F4-m)
+        registry.add("app.messaging.consumidor.filas", MENSAGERIA::filasDoConsumidor);
         registry.add("app.messaging.consumidor.espera-segundos", () -> "1");
         // Mensagem que falhou volta em 2 s (e nao em 30 s), para nao segurar a fila entre um teste e outro
         registry.add("app.messaging.consumidor.visibilidade-segundos", () -> "2");
@@ -84,6 +85,7 @@ public abstract class IntegracaoTest {
         registry.add("app.messaging.destinos.teste-comandos", MENSAGERIA::filaComandos);
         registry.add("app.messaging.destinos.teste-quebrado", MENSAGERIA::topicoInexistente);
         registry.add("app.messaging.destinos.execucao-comandos", MENSAGERIA::execucaoComandos);
+        registry.add("app.messaging.destinos.billing-comandos", MENSAGERIA::billingComandos);
         registry.add("app.messaging.destinos.os-eventos", MENSAGERIA::osEventos);
         registry.add("app.identity.base-url", IDENTITY::baseUrl);
         registry.add("app.identity.retry.espera-inicial", () -> "50ms");
@@ -132,10 +134,20 @@ public abstract class IntegracaoTest {
     /**
      * Recursos de mensageria do contexto compartilhado. {@code filaEntrada} e consumida pelo SqsConsumidor
      * da aplicacao; {@code filaAssinante} recebe (raw) o que e publicado em {@code topicoEventos}.
+     * A partir de {@code execucaoComandos}, a topologia real da Saga (tabela 3.4 da F1): comandos dos dois
+     * participantes, fila de respostas do OS (com DLQ), tópicos de eventos dos participantes (assinados raw
+     * pela fila de respostas) e a fila de notificações do Identity (assinante do {@code os-eventos}).
      */
     public record Mensageria(String filaEntrada, String topicoEventos, String filaAssinante,
                              String filaComandos, String dlq, String topicoInexistente,
-                             String execucaoComandos, String osEventos, String notificacoes) {
+                             String execucaoComandos, String osEventos, String notificacoes,
+                             String billingComandos, String sagaRespostas, String sagaRespostasDlq,
+                             String execucaoEventos, String billingEventos) {
+
+        /** Filas lidas pelo consumidor da aplicacao, separadas por virgula. */
+        public String filasDoConsumidor() {
+            return filaEntrada + "," + sagaRespostas;
+        }
 
         static Mensageria criar() {
             String filaEntrada = SQS.createQueue(r -> r.queueName("os-teste-entrada")).queueUrl();
@@ -156,8 +168,27 @@ public abstract class IntegracaoTest {
                     .attributeNames(QueueAttributeName.QUEUE_ARN)).attributes().get(QueueAttributeName.QUEUE_ARN);
             SNS.subscribe(r -> r.topicArn(osEventos).protocol("sqs").endpoint(arnNotificacoes)
                     .attributes(Map.of("RawMessageDelivery", "true")));
+            String billingComandos = SQS.createQueue(r -> r.queueName("mecanica-billing-comandos")).queueUrl();
+            String sagaRespostasDlq = SQS.createQueue(r -> r.queueName("mecanica-os-saga-respostas-dlq")).queueUrl();
+            String arnDlq = arnDaFila(sagaRespostasDlq);
+            String sagaRespostas = SQS.createQueue(r -> r.queueName("mecanica-os-saga-respostas")
+                    .attributes(Map.of(QueueAttributeName.REDRIVE_POLICY,
+                            "{\"deadLetterTargetArn\":\"%s\",\"maxReceiveCount\":5}".formatted(arnDlq)))).queueUrl();
+            String execucaoEventos = SNS.createTopic(r -> r.name("mecanica-execucao-eventos")).topicArn();
+            String billingEventos = SNS.createTopic(r -> r.name("mecanica-billing-eventos")).topicArn();
+            String arnRespostas = arnDaFila(sagaRespostas);
+            for (String topicoParticipante : List.of(execucaoEventos, billingEventos)) {
+                SNS.subscribe(r -> r.topicArn(topicoParticipante).protocol("sqs").endpoint(arnRespostas)
+                        .attributes(Map.of("RawMessageDelivery", "true")));
+            }
             return new Mensageria(filaEntrada, topico, filaAssinante, filaComandos, dlq, inexistente,
-                    execucaoComandos, osEventos, notificacoes);
+                    execucaoComandos, osEventos, notificacoes, billingComandos, sagaRespostas, sagaRespostasDlq,
+                    execucaoEventos, billingEventos);
+        }
+
+        private static String arnDaFila(String url) {
+            return SQS.getQueueAttributes(r -> r.queueUrl(url).attributeNames(QueueAttributeName.QUEUE_ARN))
+                    .attributes().get(QueueAttributeName.QUEUE_ARN);
         }
     }
 }

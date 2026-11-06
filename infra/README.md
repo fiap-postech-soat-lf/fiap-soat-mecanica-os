@@ -9,10 +9,11 @@ Terraform do OS Service, aplicado pelo `servico-cd.yml@v1` antes do build da ima
 | `data.tf` | Lê do SSM a VPC, as subnets e o SG dos nodes (`/mecanica/k8s/*`) e os parâmetros do Identity, do Execução e do Billing (tabela abaixo). Leitura direta: se faltar algum, o `plan` falha com `ParameterNotFound` |
 | `ecr.tf` | Repositório `mecanica-os` (`MUTABLE`, `force_delete`, scan on push) e lifecycle das 10 imagens mais recentes |
 | `rds.tf` | Módulo `fiap-soat-mecanica-db//modules/rds-postgres?ref=v1`: RDS, secret e SG `mecanica-os-db`, banco `os_db` |
-| `sns.tf` | Tópico `mecanica-os-eventos`, SSM `/mecanica/os/os-eventos-topic-arn` e a assinatura `os-eventos → identity-notificacoes` (raw), que é do OS por exceção (F4-a, ADR-F4-03) |
+| `sns.tf` | Tópico `mecanica-os-eventos`, SSM `/mecanica/os/os-eventos-topic-arn` e as assinaturas `os-eventos → identity-notificacoes` (raw, F4-a) e `os-eventos → execucao-os-eventos` (raw, filtrada por `type = OrdemServicoCancelada`, F5-b), ambas do OS por exceção (ADR-F4-03) |
 | `sqs.tf` | Fila `mecanica-os-saga-respostas` (visibility 30 s, retenção 4 dias) + DLQ, redrive após 5 recebimentos; policy permitindo `sns:SendMessage` dos tópicos do Execução e do Billing; as duas assinaturas raw |
 
-- A policy da fila de notificações (que permite o `os-eventos` publicar nela) fica no `infra/` do Identity, que monta o ARN do tópico a partir do nome.
+- A policy da fila de notificações (que permite o `os-eventos` publicar nela) fica no `infra/` do Identity, e a da `execucao-os-eventos` no do Execução; os dois montam o ARN do tópico a partir do nome.
+- **Assinatura do Execução (F5-b):** sem ela, uma OS cancelada antes da reserva (por exemplo, `PATCH /cancelar` em `EM_DIAGNOSTICO`) ficaria para sempre na fila do mecânico, porque o OS só manda `LiberarReservaPecas` quando houve `ReservarPecas`. É a segunda exceção à regra "o consumidor é dono da assinatura", pelo mesmo motivo da F4-a: o tópico `os-eventos` nasce depois do Execução na ordem B4 (ver ADR-F4-03).
 - Ordem B4: `identity → execucao → billing → os → -auth`. O OS é o último dos serviços porque lê o SSM dos três anteriores.
 - Tudo é destrutível sem sobra: ECR com `force_delete`, RDS sem snapshot final (regras 3.3 do plano da F2).
 
@@ -25,6 +26,7 @@ Terraform do OS Service, aplicado pelo `servico-cd.yml@v1` antes do build da ima
 | `/mecanica/identity/notificacoes-queue-arn` | lê (endpoint da assinatura) | identity |
 | `/mecanica/execucao/execucao-eventos-topic-arn` | lê (assinatura e policy) | execucao |
 | `/mecanica/execucao/execucao-comandos-queue-url` | lê (`MESSAGING_DESTINO_EXECUCAO_COMANDOS`) | execucao |
+| `/mecanica/execucao/os-eventos-queue-arn` | lê (endpoint da assinatura filtrada, F5-b) | execucao |
 | `/mecanica/billing/billing-eventos-topic-arn` | lê (assinatura e policy) | billing |
 | `/mecanica/billing/billing-comandos-queue-url` | lê (`MESSAGING_DESTINO_BILLING_COMANDOS`) | billing |
 | `/mecanica/os/os-eventos-topic-arn` | **publica** | os |

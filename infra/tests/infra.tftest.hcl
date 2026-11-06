@@ -59,6 +59,13 @@ mock_provider "aws" {
   }
 
   override_data {
+    target = data.aws_ssm_parameter.execucao_os_eventos_queue_arn
+    values = {
+      insecure_value = "arn:aws:sqs:us-east-1:123456789012:mecanica-execucao-os-eventos"
+    }
+  }
+
+  override_data {
     target = data.aws_ssm_parameter.billing_eventos_topic_arn
     values = {
       insecure_value = "arn:aws:sns:us-east-1:123456789012:mecanica-billing-eventos"
@@ -180,6 +187,40 @@ run "assinaturas_raw" {
       && aws_sns_topic_subscription.os_eventos_para_notificacoes.endpoint == "arn:aws:sqs:us-east-1:123456789012:mecanica-identity-notificacoes"
     )
     error_message = "os-eventos -> identity-notificacoes raw, com o ARN da fila lido do SSM (F4-a)."
+  }
+
+  assert {
+    condition = (
+      aws_sns_topic_subscription.os_eventos_para_execucao.raw_message_delivery
+      && aws_sns_topic_subscription.os_eventos_para_execucao.protocol == "sqs"
+      && aws_sns_topic_subscription.os_eventos_para_execucao.topic_arn == aws_sns_topic.os_eventos.arn
+      && aws_sns_topic_subscription.os_eventos_para_execucao.endpoint == "arn:aws:sqs:us-east-1:123456789012:mecanica-execucao-os-eventos"
+    )
+    error_message = "os-eventos -> execucao-os-eventos raw, com o ARN da fila lido do SSM (F5-b)."
+  }
+
+  assert {
+    condition = (
+      length(aws_sns_topic_subscription.respostas) + length([
+        aws_sns_topic_subscription.os_eventos_para_notificacoes,
+        aws_sns_topic_subscription.os_eventos_para_execucao,
+      ]) == 4
+    )
+    error_message = "O infra/ do OS cria 4 assinaturas: 2 de respostas e 2 do os-eventos."
+  }
+}
+
+run "filtro_so_cancelada" {
+  command = apply
+
+  assert {
+    condition     = jsondecode(aws_sns_topic_subscription.os_eventos_para_execucao.filter_policy) == { type = ["OrdemServicoCancelada"] }
+    error_message = "A assinatura do Execucao so recebe OrdemServicoCancelada (type)."
+  }
+
+  assert {
+    condition     = aws_sns_topic_subscription.os_eventos_para_notificacoes.filter_policy == null || aws_sns_topic_subscription.os_eventos_para_notificacoes.filter_policy == ""
+    error_message = "A assinatura do Identity continua sem filtro."
   }
 }
 

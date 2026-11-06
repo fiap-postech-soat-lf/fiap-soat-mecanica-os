@@ -30,6 +30,12 @@ data "aws_ssm_parameter" "execucao_comandos_queue_url" {
   name = "/mecanica/execucao/execucao-comandos-queue-url"
 }
 
+# F5-b: endpoint da assinatura filtrada os-eventos -> execucao-os-eventos. O Execucao aplica antes do OS
+# na ordem B4, entao a leitura e direta: sem o parametro, o plan falha com ParameterNotFound.
+data "aws_ssm_parameter" "execucao_os_eventos_queue_arn" {
+  name = "/mecanica/execucao/os-eventos-queue-arn"
+}
+
 data "aws_ssm_parameter" "billing_eventos_topic_arn" {
   name = "/mecanica/billing/billing-eventos-topic-arn"
 }

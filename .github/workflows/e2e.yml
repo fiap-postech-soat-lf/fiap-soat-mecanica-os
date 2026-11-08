@@ -1,0 +1,124 @@
+# E2E da Saga pelo API Gateway (F7-c). ESCREVE DADOS no ambiente: cria cliente, veiculo, peca e 3 OS
+# proprios a cada rodada (runId). Chamado pelo cd.yml depois do deploy e, a mao, pelo
+# scripts/subir-ambiente.sh do -k8s (na ordem de subida o OS sobe antes do -auth, entao o do CD e pulado).
+# Porteiro: sem o SSM /mecanica/auth/api-url (EKS desligado ou -auth ainda nao implantado) termina
+# verde e pulado; credencial do Academy expirada falha.
+name: E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      exigir-cobranca:
+        description: "Falha se a OS nao chegar a AGUARDANDO_PAGAMENTO (false aceita FINALIZADA, com aviso)"
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      exigir-cobranca:
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_DEFAULT_REGION: us-east-1
+    steps:
+      - name: Obter o codigo
+        uses: actions/checkout@v4
+
+      - name: Porteiro (ambiente no ar?)
+        id: porteiro
+        run: |
+          if [[ -z "$AWS_ACCESS_KEY_ID" || -z "$AWS_SECRET_ACCESS_KEY" || -z "$AWS_SESSION_TOKEN" ]]; then
+            echo "::error::Secrets AWS_* ausentes. Rode scripts/atualizar-credenciais.sh no -k8s."
+            exit 1
+          fi
+          erro_ssm="$RUNNER_TEMP/ssm.err"
+          if url=$(aws ssm get-parameter --name /mecanica/auth/api-url \
+              --query Parameter.Value --output text 2>"$erro_ssm"); then
+            echo "ativo=true" >> "$GITHUB_OUTPUT"
+            echo "url=${url%/}" >> "$GITHUB_OUTPUT"
+            echo "API: ${url%/}"
+          elif grep -q ParameterNotFound "$erro_ssm"; then
+            echo "ativo=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Ambiente desligado ou -auth ainda nao implantado (SSM /mecanica/auth/api-url ausente); E2E pulado."
+            echo "### Ambiente desligado ou -auth ainda nao implantado; E2E pulado" >> "$GITHUB_STEP_SUMMARY"
+          elif grep -Eq 'ExpiredToken|InvalidClientTokenId|UnrecognizedClient|AccessDenied' "$erro_ssm"; then
+            echo "::error::Credenciais AWS expiradas ou sem acesso: rode scripts/atualizar-credenciais.sh no -k8s. Detalhe: $(cat "$erro_ssm")"
+            exit 1
+          else
+            echo "::error::Falha ao ler o SSM: $(cat "$erro_ssm")"
+            exit 1
+          fi
+
+      - name: Configurar Node 22
+        if: steps.porteiro.outputs.ativo == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Rodar o E2E
+        id: e2e
+        if: steps.porteiro.outputs.ativo == 'true'
+        env:
+          API_BASE_URL: ${{ steps.porteiro.outputs.url }}
+          E2E_EXIGIR_COBRANCA: ${{ inputs.exigir-cobranca == false && 'false' || 'true' }}
+        run: |
+          set +e
+          node tests/api-smoke/api-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          codigo=${PIPESTATUS[0]}
+          echo "codigo=$codigo" >> "$GITHUB_OUTPUT"
+          exit "$codigo"
+
+      - name: DLQs vazias
+        id: dlqs
+        if: always() && steps.porteiro.outputs.ativo == 'true'
+        run: |
+          : > "$RUNNER_TEMP/dlqs.txt"
+          falhou=0
+          for dlq in mecanica-identity-notificacoes-dlq mecanica-os-saga-respostas-dlq \
+                     mecanica-execucao-comandos-dlq mecanica-execucao-os-eventos-dlq \
+                     mecanica-billing-comandos-dlq; do
+            if url=$(aws sqs get-queue-url --queue-name "$dlq" --query QueueUrl --output text 2>/dev/null); then
+              total=$(aws sqs get-queue-attributes --queue-url "$url" \
+                --attribute-names ApproximateNumberOfMessages \
+                --query Attributes.ApproximateNumberOfMessages --output text)
+            else
+              total="fila ausente"
+            fi
+            echo "$dlq: $total" | tee -a "$RUNNER_TEMP/dlqs.txt"
+            [[ "$total" == 0 ]] || falhou=1
+          done
+          if [[ "$falhou" == 1 ]]; then
+            echo "::error::Alguma DLQ nao esta vazia (ver o resumo)."
+            exit 1
+          fi
+
+      - name: Resumo
+        if: always() && steps.porteiro.outputs.ativo == 'true'
+        run: |
+          {
+            echo "### E2E da Saga"
+            echo "- API: \`${{ steps.porteiro.outputs.url }}\`"
+            echo "- E2E: \`${{ steps.e2e.outcome }}\` (codigo ${{ steps.e2e.outputs.codigo }})"
+            echo "- DLQs: \`${{ steps.dlqs.outcome }}\`"
+            echo
+            echo '```'
+            grep -E '^(runId|OS feliz|[0-9]+ de [0-9]+ checks|FAIL|WARN|aviso)' "$RUNNER_TEMP/e2e.log" 2>/dev/null || echo "(sem saida do E2E)"
+            echo '```'
+            echo '```'
+            cat "$RUNNER_TEMP/dlqs.txt" 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

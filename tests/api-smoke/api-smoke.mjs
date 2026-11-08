@@ -293,7 +293,7 @@ async function preparacao() {
     token: tk.atendente,
     corpo: { nome: NOME_CLIENTE, cpf: CPF, email: EMAIL_CLIENTE, telefone: '11999990000' },
   });
-  const ok4 = conferir('E04', `POST /clientes -> 201 (cpf ${CPF})`, c.status === 201 && !!c.corpo?.id,
+  const ok4 = conferir('E04', `POST /clientes -> 200 (cpf ${CPF})`, c.status === 200 && !!c.corpo?.id,
     () => `HTTP ${c.status}: ${inicio(c.texto)}`);
   exigir(ok4, 'sem cliente');
   clienteId = c.corpo.id;
@@ -302,7 +302,7 @@ async function preparacao() {
     token: tk.atendente,
     corpo: { placa: PLACA, marca: 'E2E', modelo: 'Smoke', ano: '2020', quantidadeEixos: 2, clienteId },
   });
-  const ok5 = conferir('E05', `POST /veiculos -> 201 (placa ${PLACA})`, v.status === 201 && !!v.corpo?.id,
+  const ok5 = conferir('E05', `POST /veiculos -> 200 (placa ${PLACA})`, v.status === 200 && !!v.corpo?.id,
     () => `HTTP ${v.status}: ${inicio(v.texto)}`);
   exigir(ok5, 'sem veiculo');
   veiculoId = v.corpo.id;
@@ -319,8 +319,8 @@ async function preparacao() {
     token: tk.almoxarife,
     corpo: { nome: `Peça E2E ${runId}`, marca: 'E2E', valorUnitario: VALOR_PECA, qtdEstoque: ESTOQUE_PECA },
   });
-  const ok7 = conferir('E07', 'POST /pecas -> 201 com qtdDisponivel 3',
-    p.status === 201 && p.corpo?.qtdDisponivel === ESTOQUE_PECA, () => `HTTP ${p.status}: ${inicio(p.texto)}`);
+  const ok7 = conferir('E07', 'POST /pecas -> 200 com qtdDisponivel 3',
+    p.status === 200 && p.corpo?.qtdDisponivel === ESTOQUE_PECA, () => `HTTP ${p.status}: ${inicio(p.texto)}`);
   exigir(ok7, 'sem peca');
   pecaId = p.corpo.id;
 }

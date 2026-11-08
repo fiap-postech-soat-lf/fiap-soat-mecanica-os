@@ -155,6 +155,24 @@ O Identity precisa estar em `:8081` (`app.identity.base-url`). Para abrir uma OS
 
 O CI (`ci / build`) roda os testes e a análise no SonarCloud (`fiap-postech-soat-lf_fiap-soat-mecanica-os`) com espera do Quality Gate. *TODO (F9):* print do relatório do Cucumber (`target/cucumber-report.html`) e do Sonar.
 
+## Teste ponta a ponta
+
+O `tests/api-smoke/api-smoke.mjs` (Node 22, sem dependências) prova a Saga pelo API Gateway, com os 4 serviços reais no EKS. Cada rodada cria **dados próprios** (cliente PF, veículo e uma peça, com um `runId`) e abre 3 OS, então pode rodar quantas vezes for preciso sem limpar nada e sem gastar o estoque do seed. Detalhes e variáveis em [`tests/api-smoke/README.md`](tests/api-smoke/README.md).
+
+| Cenário | O que prova |
+|---|---|
+| Caminho feliz (E08–E20) | `RECEBIDA` até `AGUARDANDO_PAGAMENTO`: orçamento de 130.00, baixa real de estoque, pagamento `PENDENTE` com o link do Checkout Pro e histórico completo |
+| Peça sem estoque (E21–E23) | `ReservaPecasRecusada`: OS e ordem voltam a `EM_DIAGNOSTICO`, sem orçamento e com o estoque intacto |
+| Orçamento recusado (E24–E25) | OS `CANCELADA`, Saga `COMPENSADA`, estoque devolvido |
+| Perfis (E26) | 403 para mecânico e cliente nas rotas de orçamento e nova cobrança; 422 com a cobrança vigente `PENDENTE` |
+
+**Onde roda:**
+- **No CD:** o job `e2e` do `cd.yml` (`needs: cd`) chama o `e2e.yml` depois do deploy. Sem o parâmetro SSM `/mecanica/auth/api-url` (EKS desligado, ou `-auth` ainda não implantado), termina verde e **pulado**; com a credencial do Academy expirada, falha. Depois do E2E, confere que as DLQs estão vazias.
+- **Na subida do ambiente:** como o OS sobe antes do `-auth`, o `scripts/subir-ambiente.sh` do `-k8s` dispara o `e2e.yml` no fim (`--sem-e2e` pula).
+- **À mão:** `gh workflow run e2e.yml`, ou `API_BASE_URL=<api-url> node tests/api-smoke/api-smoke.mjs`.
+
+**Limite:** o E2E **não paga**. Com credenciais de teste o Mercado Pago não notifica o webhook sozinho, então o fluxo para em `AGUARDANDO_PAGAMENTO`. O pagamento aprovado, o recusado e a nova cobrança são provados pelo `scripts/demo-saga-billing.sh` do `-k8s` (pagamento no navegador e notificação pelo simulador do painel). O E2E ainda depende da API do Mercado Pago para criar a preferência.
+
 ## Infraestrutura e deploy
 
 O `infra/` (Terraform) cria o ECR, o RDS `os_db` (módulo `-db@v1`), o tópico `mecanica-os-eventos`, a fila `mecanica-os-saga-respostas` com DLQ e as 3 assinaturas raw (`execucao-eventos` e `billing-eventos` → `os-saga-respostas`; `os-eventos` → `identity-notificacoes`, por exceção da ADR-F4-03). Lê do SSM os parâmetros do Identity, do Execução e do Billing. Ver `infra/README.md`.

@@ -23,3 +23,10 @@ jobs:
     with:
       servico: os
     secrets: inherit
+
+  # E2E da Saga depois do deploy (F7-c). Com o EKS desligado o "cd" termina verde e pulado, e o
+  # proprio e2e.yml se pula pelo porteiro (SSM /mecanica/auth/api-url ausente).
+  e2e:
+    needs: cd
+    uses: ./.github/workflows/e2e.yml
+    secrets: inherit

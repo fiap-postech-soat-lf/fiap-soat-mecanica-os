@@ -1,8 +1,11 @@
 # fiap-soat-mecanica-os
 
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=fiap-postech-soat-lf_fiap-soat-mecanica-os&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=fiap-postech-soat-lf_fiap-soat-mecanica-os)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=fiap-postech-soat-lf_fiap-soat-mecanica-os&metric=coverage)](https://sonarcloud.io/component_measures?id=fiap-postech-soat-lf_fiap-soat-mecanica-os&metric=coverage)
+
 Microsserviço **os** da **Fase 4** da Oficina Mecânica do Braia (Tech Challenge FIAP SOAT). É o dono da ordem de serviço (OS), do catálogo de serviços e do **orquestrador da Saga** do atendimento.
 
-> Rascunho da F4 (T10). Os trechos marcados com *TODO* dependem da janela do CP2 (prints e links) e são fechados na F9.
+Arquitetura geral da Fase 4: [diagrama da AWS](https://github.com/fiap-postech-soat-lf/fiap-soat-mecanica-k8s/blob/main/docs/arquitetura-fase4/diagrama/arquitetura-aws-fase4.png) e [ADRs](https://github.com/fiap-postech-soat-lf/fiap-soat-mecanica-k8s/tree/main/docs/arquitetura-fase4/adr). Vídeo da entrega: *link entra depois do upload*.
 
 ## Responsabilidade
 
@@ -92,7 +95,11 @@ O reenvio usa um **envelope novo** (`messageId` novo, mesmo payload). Por isso E
 
 ## API
 
-Swagger: `/os/swagger-ui.html` (via Traefik) ou `/swagger-ui.html` (local). Tabela completa em `docs/contratos/rotas.md` do `-k8s`.
+### Swagger e Postman
+
+- **Swagger:** `<api-url>/os/swagger-ui/index.html` no ambiente na AWS (a URL do API Gateway vem de `aws ssm get-parameter --name /mecanica/auth/api-url`) ou `http://localhost:8082/swagger-ui.html` local. O OpenAPI sai em `/os/v3/api-docs`. Os outros serviços têm o mesmo caminho (`/identity/...`, `/billing/...`, `/execucao/...`).
+- **Postman:** [`docs/postman/mecanica-fase4.postman_collection.json`](docs/postman/mecanica-fase4.postman_collection.json) (v2.1), com um folder por serviço (Identity, OS, Execução, Billing) e o folder **Fluxo da OS**, na ordem da Saga. Importe, preencha a variável `apiUrl` (sem barra no final) e rode primeiro os logins: os scripts de teste gravam `tokenCliente`, `tokenAtendente`, `tokenMecanico` e `tokenAlmoxarife`. O seed fornece `veiculoId`, `servicoId` e `pecaId`. O `osId`, a `prestacaoId` e o `orcamentoId` são gravados pelas respostas.
+- Tabela completa de rotas e perfis em `docs/contratos/rotas.md` do `-k8s`.
 
 | Rota | Perfil |
 |---|---|
@@ -153,7 +160,7 @@ O Identity precisa estar em `:8081` (`app.identity.base-url`). Para abrir uma OS
 - **`SagaOrquestradorIT`:** RECEBIDA → ENTREGUE com respostas simuladas, idempotência (mesmo `messageId` duas vezes → um efeito), descarte fora do passo, conflito de versão e timeout do `AbrirDiagnostico`.
 - **BDD (Cucumber, em português):** `src/test/resources/features/atendimento_os.feature`, executado por `AtendimentoOsBddIT` (no mesmo contexto Spring). Cenários: caminho feliz até a entrega; peça sem estoque; orçamento recusado e orçamento expirado (esquema do cenário), que compensam a reserva e cancelam a OS; e pagamento recusado com nova cobrança. `ParticipantesSimulados` faz o papel do Execução e do Billing.
 
-O CI (`ci / build`) roda os testes e a análise no SonarCloud (`fiap-postech-soat-lf_fiap-soat-mecanica-os`) com espera do Quality Gate. *TODO (F9):* print do relatório do Cucumber (`target/cucumber-report.html`) e do Sonar.
+O CI (`ci / build`) roda os testes e a análise no SonarCloud com espera do Quality Gate. A evidência de cobertura e do gate está nos badges do topo e no [projeto no SonarCloud](https://sonarcloud.io/summary/new_code?id=fiap-postech-soat-lf_fiap-soat-mecanica-os). O relatório HTML do Cucumber sai em `target/cucumber-report.html` depois do `./mvnw verify`.
 
 ## Teste ponta a ponta
 

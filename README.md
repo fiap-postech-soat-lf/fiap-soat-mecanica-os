@@ -162,6 +162,8 @@ O Identity precisa estar em `:8081` (`app.identity.base-url`). Para abrir uma OS
 
 O CI (`ci / build`) roda os testes e a análise no SonarCloud com espera do Quality Gate. A evidência de cobertura e do gate está nos badges do topo e no [projeto no SonarCloud](https://sonarcloud.io/summary/new_code?id=fiap-postech-soat-lf_fiap-soat-mecanica-os). O relatório HTML do Cucumber sai em `target/cucumber-report.html` depois do `./mvnw verify`.
 
+![Relatório do Cucumber: 5 cenários, 100% aprovados](docs/img/cucumber-report.png)
+
 ## Teste ponta a ponta
 
 O `tests/api-smoke/api-smoke.mjs` (Node 22, sem dependências) prova a Saga pelo API Gateway, com os 4 serviços reais no EKS. Cada rodada cria **dados próprios** (cliente PF, veículo e uma peça, com um `runId`) e abre 3 OS, então pode rodar quantas vezes for preciso sem limpar nada e sem gastar o estoque do seed. Detalhes e variáveis em [`tests/api-smoke/README.md`](tests/api-smoke/README.md).

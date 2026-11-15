@@ -3,9 +3,9 @@
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=fiap-postech-soat-lf_fiap-soat-mecanica-os&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=fiap-postech-soat-lf_fiap-soat-mecanica-os)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=fiap-postech-soat-lf_fiap-soat-mecanica-os&metric=coverage)](https://sonarcloud.io/component_measures?id=fiap-postech-soat-lf_fiap-soat-mecanica-os&metric=coverage)
 
-Microsserviço **os** da **Fase 4** da Oficina Mecânica do Braia (Tech Challenge FIAP SOAT). É o dono da ordem de serviço (OS), do catálogo de serviços e do **orquestrador da Saga** do atendimento.
+Microsserviço **os** da **Fase 4** da Oficina Mecânica SOAT15 - LF (Tech Challenge FIAP SOAT). É o dono da ordem de serviço (OS), do catálogo de serviços e do **orquestrador da Saga** do atendimento.
 
-Arquitetura geral da Fase 4: [diagrama da AWS](https://github.com/fiap-postech-soat-lf/fiap-soat-mecanica-k8s/blob/main/docs/arquitetura-fase4/diagrama/arquitetura-aws-fase4.png) e [ADRs](https://github.com/fiap-postech-soat-lf/fiap-soat-mecanica-k8s/tree/main/docs/arquitetura-fase4/adr). Vídeo da entrega: *link entra depois do upload*.
+Arquitetura geral da Fase 4: [diagrama da AWS](https://github.com/fiap-postech-soat-lf/fiap-soat-mecanica-k8s/blob/main/docs/arquitetura-fase4/diagrama/arquitetura-aws-fase4.png) e [ADRs](https://github.com/fiap-postech-soat-lf/fiap-soat-mecanica-k8s/tree/main/docs/arquitetura-fase4/adr). Vídeo da entrega: [assistir no Vimeo](https://vimeo.com/1246945589).
 
 ## Responsabilidade
 

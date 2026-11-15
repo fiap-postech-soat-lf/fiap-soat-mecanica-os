@@ -9,7 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.UUID;
 
-/** Eventos de negocio em log estruturado (as queries de log da Fase 3 continuam valendo). */
+/** Eventos de negocio em log estruturado. */
 @Slf4j
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class BusinessEventLogger {

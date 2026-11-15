@@ -11,7 +11,7 @@ import java.util.UUID;
 /**
  * Chaves de MDC usadas nos logs estruturados e helpers para abrir e fechar escopos.
  * O correlationId acompanha a requisicao HTTP e as mensagens; o requestId e mantido com o
- * mesmo valor para nao quebrar as queries de log da Fase 3.
+ * mesmo valor para nao quebrar as queries de log ja existentes.
  */
 public final class Mdc {
 

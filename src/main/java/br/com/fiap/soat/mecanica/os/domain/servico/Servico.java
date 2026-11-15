@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 
 import java.util.UUID;
 
-/** Item do catalogo de servicos da oficina. Mantem o soft delete (ativo/inativo) do monolito. */
+/** Item do catalogo de servicos da oficina. Mantem o soft delete (ativo/inativo). */
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Servico extends Principal {
